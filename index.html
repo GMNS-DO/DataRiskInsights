@@ -1,0 +1,4811 @@
+<!DOCTYPE html>
+<html lang="en">
+<!--
+================================================================
+GMNS RISK INTELLIGENCE — SETUP GUIDE
+================================================================
+
+STEP 1: Deploy the Cloudflare Worker (one-time, ~20 minutes)
+  a. Create account at dash.cloudflare.com (free)
+  b. Go to Workers & Pages → Create Worker
+  c. Replace editor content entirely with worker.js from this project
+  d. Settings → Variables → Add environment variable:
+       Name:  ANTHROPIC_API_KEY
+       Value: sk-ant-... (get from console.anthropic.com → API Keys → Create Key)
+  e. Change ALLOWED_ORIGIN in worker.js to your GitHub Pages URL
+  f. Click Deploy → copy the Worker URL shown
+
+STEP 2: Update this file
+  a. Find: const WORKER_URL = 'https://YOUR_WORKER.workers.dev';
+  b. Replace with your actual Worker URL from Step 1f
+
+STEP 3: Push to GitHub Pages
+  a. Create a GitHub repository
+  b. Push index.html and worker.js to the main branch
+  c. Go to Settings → Pages → Source: main branch, root (/)
+  d. Your app URL: https://YOUR_USERNAME.github.io/YOUR_REPO_NAME/
+  e. Update ALLOWED_ORIGIN in worker.js with this URL → redeploy worker
+
+STEP 4: Share with team
+  Send them the GitHub Pages URL. Nothing to install.
+
+AI features require the Cloudflare Worker to be deployed. See worker.js for setup instructions.
+
+COST ESTIMATE:
+  - claude-haiku-4-5-20251001: ~₹0.50 per 200-record classification run
+  - Cloudflare Workers free tier: 100,000 requests/day
+  - 10 team members running daily classification: ~₹60/month (~$0.70/month)
+  - Add $5 credits at console.anthropic.com → lasts 6-8 months at this usage
+================================================================
+-->
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GMNS Risk Intelligence</title>
+
+<!-- SheetJS — Excel parsing -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- Chart.js — visualisations -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<!-- html2canvas — dashboard screenshot for PDF -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<!-- jsPDF — PDF generation -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --blue: #006FCF;
+  --blue-dark: #0052A3;
+  --blue-light: #E8F4FF;
+  --navy: #0C1929;
+  --bg: #F4F6F9;
+  --surface: #FFFFFF;
+  --border: #D4DDE8;
+  --text: #1A2332;
+  --text2: #4A5568;
+  --text3: #8E9BAD;
+  --green: #1A7F4B;
+  --green-bg: #E6F4ED;
+  --amber: #C45E00;
+  --amber-bg: #FFF0E3;
+  --red: #C1202A;
+  --red-bg: #FDE8E9;
+  --gray: #6B7280;
+  --gray-bg: #F3F4F6;
+  --radius: 8px;
+  --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+/* Upload Screen */
+body {
+  font-family: 'DM Sans', sans-serif;
+  margin: 0;
+  background: var(--bg);
+}
+
+#upload-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  gap: 24px;
+}
+
+.app-title {
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: var(--blue);
+  margin: 0;
+}
+
+.tagline {
+  font-size: 1.1rem;
+  color: var(--text2);
+  margin: 0;
+}
+
+.upload-zone {
+  dashed border 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 48px;
+  text-align: center;
+  cursor: pointer;
+  background: var(--surface);
+  transition: all 0.2s;
+  border: 2px dashed var(--border);
+  min-width: 400px;
+}
+
+.upload-zone:hover {
+  border-color: var(--blue);
+  background: var(--blue-light);
+}
+
+.upload-zone.drag-over {
+  border-color: var(--blue);
+  background: var(--blue-light);
+  transform: scale(1.02);
+}
+
+.upload-zone p {
+  color: var(--text3);
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+.upload-zone .upload-hint {
+  font-size: 0.8rem;
+  color: var(--text3);
+  margin-top: 8px;
+}
+
+#file-input {
+  display: none;
+}
+
+.file-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--blue-light);
+  color: var(--blue);
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.file-badge .remove-file {
+  cursor: pointer;
+  background: none;
+  border: none;
+  color: var(--blue);
+  font-size: 1.2rem;
+  padding: 0 0 0 8px;
+}
+
+.sheet-preview {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.sheet-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--gray-bg);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 0.82rem;
+}
+
+#load-btn {
+  background: var(--blue);
+  color: white;
+  border: none;
+  padding: 12px 32px;
+  border-radius: var(--radius);
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+  display: none;
+  font-family: 'DM Sans', sans-serif;
+}
+
+#load-btn:hover {
+  background: var(--blue-dark);
+}
+
+#load-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+#upload-error {
+  color: var(--red);
+  font-size: 0.85rem;
+  margin-top: 8px;
+  min-height: 20px;
+}
+
+#setup-notice {
+  margin-top: 16px;
+  background: var(--amber-bg);
+  color: var(--amber);
+  padding: 12px 20px;
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  max-width: 500px;
+  text-align: center;
+}
+
+/* Loading Overlay */
+#loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.6);
+  gap: 16px;
+}
+
+#loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid rgba(255,255,255,0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+#loading-msg {
+  color: white;
+  font-size: 1.1rem;
+  font-weight: 500;
+}
+
+/* Topbar */
+#topbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--navy);
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  height: 56px;
+  gap: 16px;
+  box-shadow: var(--shadow);
+}
+
+.topbar-logo {
+  color: white;
+  font-size: 1.2rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.topbar-tabs {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+  justify-content: center;
+}
+
+.topbar-tab {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.6);
+  padding: 8px 20px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.topbar-tab:hover {
+  color: white;
+}
+
+.topbar-tab.active {
+  color: white;
+  border-bottom-color: var(--blue);
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+#meta-info {
+  color: rgba(255,255,255,0.7);
+  font-size: 0.82rem;
+}
+
+.topbar-btn {
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.2);
+  color: white;
+  padding: 6px 14px;
+  border-radius: var(--radius);
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.topbar-btn:hover {
+  background: rgba(255,255,255,0.2);
+}
+
+/* Tab Panels */
+.tab-panel {
+  padding: 20px 24px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+/* Filter Bar */
+#filter-bar {
+  position: sticky;
+  top: 56px;
+  z-index: 90;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.filter-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.filter-select {
+  background: var(--gray-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  font-size: 0.85rem;
+  color: var(--text);
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  min-width: 120px;
+}
+
+.filter-select:focus {
+  outline: none;
+  border-color: var(--blue);
+}
+
+#clear-filters-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 14px;
+  font-size: 0.82rem;
+  color: var(--text2);
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+}
+
+#clear-filters-btn:hover {
+  background: var(--gray-bg);
+}
+
+.filter-count-badge {
+  background: var(--blue);
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.filter-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.filter-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--blue-light);
+  color: var(--blue);
+  padding: 3px 10px;
+  border-radius: 16px;
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.filter-tag button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--blue);
+  font-size: 0.9rem;
+  padding: 0;
+  line-height: 1;
+}
+
+#view-toggle {
+  display: flex;
+  gap: 0;
+  background: var(--gray-bg);
+  border-radius: var(--radius);
+  padding: 2px;
+}
+
+.view-btn {
+  background: none;
+  border: none;
+  padding: 6px 16px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--text2);
+  transition: all 0.2s;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.view-btn.active {
+  background: var(--surface);
+  color: var(--blue);
+  box-shadow: var(--shadow);
+}
+
+/* KPI Section */
+#kpi-section {
+  margin: 16px 0;
+}
+
+#kpi-row {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.kpi-card {
+  min-width: 140px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 16px;
+  border-top: 3px solid var(--blue);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kpi-card.green {
+  border-top-color: var(--green);
+}
+
+.kpi-card.amber {
+  border-top-color: var(--amber);
+}
+
+.kpi-card.red {
+  border-top-color: var(--red);
+}
+
+.kpi-card.dark {
+  border-top-color: var(--gray);
+}
+
+.kpi-number {
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+}
+
+.kpi-label {
+  font-size: 0.78rem;
+  color: var(--text3);
+  font-weight: 500;
+}
+
+.kpi-sub {
+  font-size: 0.75rem;
+  color: var(--text3);
+}
+
+/* New This Month Pane */
+#ntm-pane {
+  margin-bottom: 16px;
+}
+
+.ntm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+
+.ntm-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ntm-month {
+  font-weight: 700;
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.ntm-badge {
+  background: var(--blue-light);
+  color: var(--blue);
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.ntm-meta {
+  color: var(--text3);
+  font-size: 0.82rem;
+}
+
+.ntm-toggle {
+  color: var(--text3);
+  font-size: 0.85rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.ntm-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.ntm-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ntm-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ntm-card-id {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+.ntm-card-title {
+  font-size: 0.9rem;
+  color: var(--text);
+  font-weight: 500;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ntm-card-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ntm-card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.ntm-card-btn {
+  padding: 5px 12px;
+  border-radius: calc(var(--radius) - 2px);
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.ntm-card-btn.classify {
+  background: var(--blue-light);
+  color: var(--blue);
+}
+
+.ntm-card-btn.dive {
+  background: var(--navy);
+  color: white;
+}
+
+/* Chart Panels */
+.ch-grid {
+  display: grid;
+  gap: 16px;
+  margin: 16px 0;
+}
+
+.ch-grid.c3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.ch-grid.c2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.ch-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+
+.ch-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.ch-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.ch-sub {
+  font-size: 0.78rem;
+  color: var(--text3);
+  margin-left: auto;
+  margin-right: 12px;
+}
+
+.ch-download {
+  background: none;
+  border: none;
+  color: var(--text3);
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 4px;
+}
+
+.ch-download:hover {
+  color: var(--blue);
+}
+
+.ch-wrap {
+  position: relative;
+}
+
+.ch-no-data {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text3);
+  font-size: 0.85rem;
+}
+
+/* Data Quality Flags */
+#quality-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.quality-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: var(--shadow);
+}
+
+.quality-card:hover {
+  border-color: var(--blue);
+  box-shadow: var(--shadow-md);
+}
+
+.quality-card.has-issues {
+  border-left: 3px solid var(--red);
+}
+
+.quality-card .q-icon {
+  font-size: 1.3rem;
+}
+
+.quality-card .q-info {
+  flex: 1;
+}
+
+.quality-card .q-label {
+  font-size: 0.82rem;
+  color: var(--text3);
+}
+
+.quality-card .q-count {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.quality-card.has-issues .q-count {
+  color: var(--red);
+}
+
+/* Drilldown Table */
+#table-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin-top: 16px;
+  overflow: hidden;
+}
+
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.table-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.table-title {
+  font-weight: 600;
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.table-count {
+  font-size: 0.8rem;
+  color: var(--text3);
+}
+
+.table-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  max-width: 320px;
+}
+
+.table-search input {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 7px 12px;
+  font-size: 0.85rem;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.table-search input:focus {
+  outline: none;
+  border-color: var(--blue);
+}
+
+.table-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.table-export-btn {
+  background: var(--gray-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 7px 14px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  color: var(--text2);
+  font-family: 'DM Sans', sans-serif;
+}
+
+.table-export-btn:hover {
+  background: var(--border);
+}
+
+.table-wrapper {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+thead {
+  background: var(--bg);
+  position: sticky;
+  top: 0;
+}
+
+th {
+  padding: 10px 12px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--text3);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+th:hover {
+  color: var(--text);
+}
+
+th.active {
+  color: var(--blue);
+}
+
+th .sort-icon {
+  margin-left: 4px;
+  font-size: 0.7rem;
+}
+
+td {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  color: var(--text2);
+}
+
+tbody tr:hover {
+  background: var(--blue-light);
+  cursor: pointer;
+}
+
+tbody tr.has-issue {
+  background: #F0FDF4;
+}
+
+tbody tr.review-needed {
+  border-left: 3px solid var(--amber);
+}
+
+tbody tr.review-needed td:first-child {
+  border-left: 3px solid var(--amber);
+}
+
+.table-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.pagination-info {
+  font-size: 0.82rem;
+  color: var(--text3);
+}
+
+.pagination-controls {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.page-btn {
+  min-width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 4px);
+  background: var(--surface);
+  font-size: 0.82rem;
+  cursor: pointer;
+  color: var(--text2);
+  padding: 0 6px;
+}
+
+.page-btn:hover {
+  background: var(--gray-bg);
+}
+
+.page-btn.active {
+  background: var(--blue);
+  color: white;
+  border-color: var(--blue);
+}
+
+.page-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Badges */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.badge-ore {
+  background: var(--blue-light);
+  color: var(--blue);
+}
+
+.badge-issue {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.badge-high {
+  background: var(--red-bg);
+  color: var(--red);
+}
+
+.badge-medium {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+
+.badge-low {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.badge-open {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.badge-closed {
+  background: var(--gray-bg);
+  color: var(--gray);
+}
+
+.badge-overdue {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+
+.badge-ongoing {
+  background: #FFF3E0;
+  color: #E65100;
+}
+
+.badge-due-soon {
+  background: var(--blue-light);
+  color: var(--blue);
+}
+
+.badge-flagged {
+  background: var(--gray-bg);
+  color: var(--gray);
+}
+
+.mono {
+  font-family: 'DM Mono', monospace;
+}
+
+/* Deep Dive Panel */
+#deep-dive-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 480px;
+  background: var(--surface);
+  box-shadow: -4px 0 20px rgba(0,0,0,0.15);
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.3s ease;
+}
+
+#deep-dive-panel.open {
+  transform: translateX(0);
+}
+
+#dd-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 199;
+  display: none;
+}
+
+.dd-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dd-header-left {
+  flex: 1;
+  min-width: 0;
+}
+
+.dd-id {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.82rem;
+  color: var(--text3);
+  margin-bottom: 4px;
+}
+
+.dd-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.dd-close {
+  background: none;
+  border: none;
+  font-size: 1.4rem;
+  cursor: pointer;
+  color: var(--text3);
+  padding: 0;
+  line-height: 1;
+}
+
+.dd-close:hover {
+  color: var(--text);
+}
+
+.dd-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  padding: 0 20px;
+}
+
+.dd-tab {
+  padding: 10px 16px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text3);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  background: none;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.dd-tab.active {
+  color: var(--blue);
+  border-bottom-color: var(--blue);
+}
+
+.dd-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+
+.dd-content.hidden {
+  display: none;
+}
+
+.dd-field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
+}
+
+.dd-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dd-field .label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.dd-field .value {
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+/* Deep Dive field list grid */
+.dd-field-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
+  padding: 12px;
+}
+.dd-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dd-field-key {
+  font-size: 10px;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 500;
+}
+.dd-field-val {
+  font-size: 12px;
+  color: var(--text);
+  word-break: break-word;
+}
+
+/* Classification tab content */
+.dd-no-clf {
+  padding: 24px;
+  text-align: center;
+  color: var(--text2);
+  font-size: 13px;
+}
+.dd-clf-fields {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  max-height: calc(100vh - 200px);
+}
+.dd-clf-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.dd-clf-key {
+  color: var(--text2);
+  font-weight: 500;
+}
+.dd-clf-val {
+  color: var(--text);
+  font-weight: 600;
+}
+.dd-clf-yes { color: var(--green); }
+.dd-clf-no  { color: var(--text2); }
+.dd-clf-conf-high   { color: var(--green); }
+.dd-clf-conf-medium { color: var(--amber); }
+.dd-clf-conf-low    { color: var(--red); }
+.dd-clf-warn { color: var(--amber); }
+.dd-clf-ok   { color: var(--green); }
+.dd-clf-section-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text3);
+  font-weight: 600;
+  margin-top: 12px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.dd-clf-section-title:first-child { margin-top: 0; }
+.dd-clf-text {
+  font-size: 12px;
+  color: var(--text2);
+  line-height: 1.5;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+/* Clarifying query chips */
+.dd-query-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+.dd-query-chip {
+  background: var(--blue-light);
+  color: var(--blue-dark);
+  border: 1px solid var(--blue);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+  font-family: var(--font-sans);
+}
+.dd-query-chip:hover { background: #d0e8ff; }
+
+/* Deep Dive Chat */
+#dd-content-chat {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 160px);
+}
+.dd-chat-history {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dd-chat-msg { display: flex; flex-direction: column; gap: 4px; }
+.dd-chat-msg.user { align-items: flex-end; }
+.dd-chat-msg.ai   { align-items: flex-start; }
+.dd-chat-role {
+  font-size: 10px;
+  color: var(--text3);
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 0 4px;
+}
+.dd-chat-text {
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.dd-chat-msg.user .dd-chat-text {
+  background: var(--blue);
+  color: white;
+}
+.dd-chat-msg.ai .dd-chat-text {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+#dd-typing {
+  padding: 8px 12px;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+#dd-typing.hidden { display: none; }
+.dd-typing-dots {
+  display: flex;
+  gap: 3px;
+  background: var(--surface);
+  padding: 8px 12px;
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+.dd-typing-dots span {
+  width: 6px; height: 6px;
+  background: var(--text3);
+  border-radius: 50%;
+  animation: dd-bounce 1.2s infinite;
+}
+.dd-typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.dd-typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes dd-bounce {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-4px); }
+}
+
+/* AI Assistant chat bubbles */
+.as-msg { margin-bottom: 12px; display: flex; }
+.as-msg.user { justify-content: flex-end; }
+.as-msg.ai   { justify-content: flex-start; }
+.as-msg-content {
+  max-width: 75%;
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+.as-msg.user .as-msg-content {
+  background: var(--blue);
+  color: white;
+}
+.as-msg.ai .as-msg-content {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+#assistant-typing {
+  display: flex;
+  gap: 4px;
+  padding: 8px 0;
+  margin-bottom: 12px;
+}
+#assistant-typing.hidden { display: none; }
+#assistant-typing .typing-dots {
+  display: flex;
+  gap: 3px;
+  background: var(--surface);
+  padding: 10px 14px;
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+#assistant-typing .typing-dots span {
+  width: 6px; height: 6px;
+  background: var(--text3);
+  border-radius: 50%;
+  animation: typing-bounce 1.2s infinite;
+}
+#assistant-typing .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+#assistant-typing .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-4px); }
+}
+
+/* Upload AI notice */
+.upload-ai-notice {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text2);
+  text-align: center;
+}
+.upload-ai-notice a {
+  color: var(--blue);
+  text-decoration: none;
+}
+.upload-ai-notice a:hover { text-decoration: underline; }
+
+/* Hidden utility */
+.hidden { display: none !important; }
+
+.dd-classification-section {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dd-class-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+
+.dd-class-card .cl-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.dd-class-card .cl-value {
+  font-size: 0.85rem;
+  color: var(--text);
+  margin-top: 2px;
+}
+
+.dd-query-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.dd-query-chip {
+  background: var(--blue-light);
+  color: var(--blue);
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  border: none;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.dd-query-chip:hover {
+  background: var(--blue);
+  color: white;
+}
+
+.dd-no-class {
+  text-align: center;
+  color: var(--text3);
+  padding: 40px 0;
+  font-size: 0.9rem;
+}
+
+.dd-chat-history {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.dd-msg {
+  max-width: 90%;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.dd-msg.user {
+  align-self: flex-end;
+  background: var(--blue);
+  color: white;
+}
+
+.dd-msg.assistant {
+  align-self: flex-start;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.dd-typing {
+  align-self: flex-start;
+  padding: 12px 14px;
+  background: var(--bg);
+  border-radius: var(--radius);
+  color: var(--text3);
+  font-size: 0.88rem;
+}
+
+.dd-typing.hidden {
+  display: none;
+}
+
+.dd-typing-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.dd-typing-dots span {
+  width: 5px;
+  height: 5px;
+  background: var(--text3);
+  border-radius: 50%;
+  animation: dd-bounce 1.2s infinite;
+}
+
+.dd-typing-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.dd-typing-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes dd-bounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(-4px);
+  }
+}
+
+.dd-chat-input-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.dd-chat-input {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  font-size: 0.88rem;
+  resize: none;
+  font-family: 'DM Sans', sans-serif;
+  min-height: 40px;
+  max-height: 120px;
+}
+
+.dd-chat-input:focus {
+  outline: none;
+  border-color: var(--blue);
+}
+
+.dd-send-btn {
+  background: var(--blue);
+  color: white;
+  border: none;
+  border-radius: var(--radius);
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.dd-send-btn:hover {
+  background: var(--blue-dark);
+}
+
+.dd-download-conv {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  background: var(--gray-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  text-align: center;
+  color: var(--text2);
+  font-family: 'DM Sans', sans-serif;
+}
+
+/* Classifier Tab */
+.clf-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.clf-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.clf-heading h2 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+
+.clf-heading p {
+  font-size: 0.78rem;
+  color: var(--text3);
+}
+
+.clf-controls-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.clf-record-count {
+  font-size: 0.85rem;
+  color: var(--text3);
+}
+
+#clf-run-btn {
+  background: var(--blue);
+  color: white;
+  border: none;
+  padding: 10px 24px;
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#clf-run-btn:hover {
+  background: var(--blue-dark);
+}
+
+#clf-run-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.clf-download-btn {
+  background: var(--green);
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  display: none;
+  align-items: center;
+  gap: 6px;
+}
+
+#clf-cancel-btn {
+  background: var(--red);
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  display: none;
+}
+
+#clf-progress-section {
+  display: none;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.clf-progress-bar {
+  height: 6px;
+  background: var(--gray-bg);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+#clf-progress-fill {
+  height: 100%;
+  background: var(--blue);
+  border-radius: 3px;
+  width: 0%;
+  transition: width 0.3s;
+}
+
+#clf-progress-label {
+  font-size: 0.82rem;
+  color: var(--text3);
+}
+
+.clf-sub-label {
+  font-size: 0.75rem;
+  color: var(--text3);
+  margin-top: 4px;
+}
+
+.clf-view-toggle {
+  display: flex;
+  gap: 0;
+  background: var(--gray-bg);
+  border-radius: var(--radius);
+  padding: 2px;
+  margin: 12px 20px 0;
+}
+
+.clf-view-btn {
+  background: none;
+  border: none;
+  padding: 6px 16px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--text2);
+  transition: all 0.2s;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.clf-view-btn.active {
+  background: var(--surface);
+  color: var(--blue);
+  box-shadow: var(--shadow);
+}
+
+.clf-filter-bar {
+  display: flex;
+  gap: 10px;
+  padding: 10px 20px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.clf-filter-label {
+  font-size: 0.78rem;
+  color: var(--text3);
+}
+
+.clf-filter-select {
+  background: var(--gray-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 5px 10px;
+  font-size: 0.8rem;
+  color: var(--text);
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.clf-table-wrap {
+  overflow-x: auto;
+  padding: 0 20px 20px;
+}
+
+.clf-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.83rem;
+}
+
+.clf-table th {
+  padding: 9px 10px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--text3);
+  white-space: nowrap;
+  border-bottom: 2px solid var(--border);
+  background: var(--bg);
+  position: sticky;
+  top: 0;
+}
+
+.clf-table td {
+  padding: 9px 10px;
+  border-top: 1px solid var(--border);
+  color: var(--text2);
+  vertical-align: top;
+}
+
+.clf-table tbody tr:hover {
+  background: var(--blue-light);
+  cursor: pointer;
+}
+
+.clf-table tbody tr.data-issue-row {
+  background: #F0FDF4;
+}
+
+.clf-table tbody tr.review-row td:first-child {
+  border-left: 3px solid var(--amber);
+}
+
+.clf-conf-high {
+  color: var(--green);
+  font-weight: 600;
+}
+
+.clf-conf-medium {
+  color: var(--amber);
+  font-weight: 600;
+}
+
+.clf-conf-low {
+  color: var(--red);
+  font-weight: 600;
+}
+
+.clf-data-yes {
+  background: var(--green-bg);
+  color: var(--green);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.clf-data-no {
+  background: var(--gray-bg);
+  color: var(--gray);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.clf-manual-review {
+  color: var(--amber);
+  font-size: 1rem;
+}
+
+.clf-no-manual {
+  color: var(--text3);
+  font-size: 0.9rem;
+}
+
+.clf-wrap {
+  word-wrap: break-word;
+  max-width: 200px;
+}
+
+.clf-wrap-3 {
+  word-wrap: break-word;
+  max-width: 300px;
+  font-size: 0.8rem;
+}
+
+.clf-detail-wrap {
+  word-wrap: break-word;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+/* AI Assistant Tab */
+#tab-assistant {
+  display: flex;
+  height: calc(100vh - 56px);
+  padding: 0;
+  overflow: hidden;
+}
+
+.assistant-layout {
+  display: flex;
+  width: 100%;
+  height: 100%;
+}
+
+.assistant-left {
+  width: 280px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  gap: 16px;
+  overflow-y: auto;
+}
+
+.assistant-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.assistant-subtitle {
+  font-size: 0.78rem;
+  color: var(--text3);
+}
+
+.quick-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.quick-action-btn {
+  background: var(--gray-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 0.8rem;
+  color: var(--text2);
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: 'DM Sans', sans-serif;
+  line-height: 1.4;
+}
+
+.quick-action-btn:hover {
+  background: var(--blue-light);
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+.assistant-summary {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.assistant-summary-title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.assistant-summary-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+}
+
+.assistant-summary-row .label {
+  color: var(--text3);
+}
+
+.assistant-summary-row .val {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.assistant-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.assistant-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chat-msg {
+  max-width: 75%;
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.chat-msg.user {
+  align-self: flex-end;
+  background: var(--blue);
+  color: white;
+}
+
+.chat-msg.assistant {
+  align-self: flex-start;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+.chat-msg pre {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.8rem;
+}
+
+.assistant-typing {
+  align-self: flex-start;
+  padding: 12px 16px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.assistant-typing-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.assistant-typing-dots span {
+  width: 5px;
+  height: 5px;
+  background: var(--text3);
+  border-radius: 50%;
+  animation: asst-bounce 1.2s infinite;
+}
+
+.assistant-typing-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.assistant-typing-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes asst-bounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(-4px);
+  }
+}
+
+.assistant-input-row {
+  display: flex;
+  gap: 10px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.assistant-input {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-size: 0.9rem;
+  resize: none;
+  font-family: 'DM Sans', sans-serif;
+  min-height: 44px;
+  max-height: 120px;
+}
+
+.assistant-input:focus {
+  outline: none;
+  border-color: var(--blue);
+}
+
+.assistant-send-btn {
+  background: var(--blue);
+  color: white;
+  border: none;
+  border-radius: var(--radius);
+  padding: 10px 20px;
+  cursor: pointer;
+  font-size: 0.88rem;
+  font-weight: 500;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.assistant-send-btn:hover {
+  background: var(--blue-dark);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .ch-grid.c3 {
+    grid-template-columns: 1fr;
+  }
+  .ch-grid.c2 {
+    grid-template-columns: 1fr;
+  }
+  #quality-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  #deep-dive-panel {
+    width: 100%;
+  }
+  .assistant-left {
+    display: none;
+  }
+  .ntm-cards {
+    grid-template-columns: 1fr;
+  }
+  #tab-assistant {
+    display: block;
+    height: auto;
+  }
+  .assistant-main {
+    height: calc(100vh - 56px);
+  }
+}
+
+@media (max-width: 480px) {
+  .topbar-tabs {
+    display: none;
+  }
+  #quality-row {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
+
+</head>
+<body>
+  <!-- SCREEN 1: Upload -->
+  <div id="upload-screen">
+    <h1 class="app-title">GMNS Risk Intelligence</h1>
+    <p class="tagline">ORE &amp; Data Issues Intelligence Platform</p>
+    <div class="upload-zone" id="drop-zone">
+      <p>Drag &amp; drop your Excel file here, or click to browse</p>
+      <p class="upload-hint">Supports .xlsx and .xls — ORE sheets, Data Issue sheets, or combined workbooks</p>
+      <input type="file" id="file-input" accept=".xlsx,.xls">
+    </div>
+    <div id="file-area"></div>
+    <button id="load-btn">Load Dashboard</button>
+    <div id="upload-error"></div>
+    <div class="upload-ai-notice">
+      AI features (Classifier, AI Assistant) require the
+      <a href="#" onclick="alert('Deploy the Cloudflare Worker first. See the setup guide comment at the top of index.html.');return false">Cloudflare Worker</a>
+      to be deployed. Dashboard analytics work without it.
+    </div>
+  </div>
+
+  <!-- LOADING OVERLAY -->
+  <div id="loading-overlay">
+    <div id="loading-spinner"></div>
+    <p id="loading-msg">Processing...</p>
+  </div>
+
+  <!-- SCREEN 2: App -->
+  <div id="app" style="display:none">
+
+    <!-- TOPBAR -->
+    <header id="topbar">
+      <div class="topbar-logo">GMNS Risk Intelligence</div>
+      <div class="topbar-tabs">
+        <button class="topbar-tab active" data-tab="dashboard">Dashboard</button>
+        <button class="topbar-tab" data-tab="classifier">Classifier</button>
+        <button class="topbar-tab" data-tab="assistant">AI Assistant</button>
+      </div>
+      <div class="topbar-right">
+        <span id="meta-info"></span>
+        <button class="topbar-btn" id="pdf-btn">&#x2B07; PDF</button>
+        <button class="topbar-btn" id="new-upload-btn">New Upload</button>
+      </div>
+    </header>
+
+    <!-- TAB: DASHBOARD -->
+    <div id="tab-dashboard" class="tab-panel">
+
+      <!-- NEW THIS MONTH PANE -->
+      <div id="ntm-pane"></div>
+
+      <!-- VIEW TOGGLE -->
+      <div id="view-toggle" style="margin:16px 0 0">
+        <button class="view-btn active" data-view="combined">Combined</button>
+        <button class="view-btn" data-view="ore">ORE</button>
+        <button class="view-btn" data-view="issue">Issues</button>
+      </div>
+
+      <!-- FILTER BAR -->
+      <div id="filter-bar">
+        <span class="filter-label">Filters:</span>
+        <select class="filter-select" id="filter-type" style="display:none">
+          <option value="">All Types</option>
+        </select>
+        <select class="filter-select" id="filter-status">
+          <option value="">All Status</option>
+        </select>
+        <select class="filter-select" id="filter-rating">
+          <option value="">All Ratings</option>
+        </select>
+        <select class="filter-select" id="filter-theme">
+          <option value="">All Themes</option>
+        </select>
+        <select class="filter-select" id="filter-owner">
+          <option value="">All Owners</option>
+        </select>
+        <select class="filter-select" id="filter-market">
+          <option value="">All Markets</option>
+        </select>
+        <select class="filter-select" id="filter-age">
+          <option value="">All Ages</option>
+        </select>
+        <span class="filter-count-badge" id="filter-count" style="display:none">0</span>
+        <div class="filter-tags" id="filter-tags"></div>
+        <button id="clear-filters-btn">Clear All</button>
+      </div>
+
+      <!-- KPI ROW -->
+      <div id="kpi-section"><div id="kpi-row"></div></div>
+
+      <!-- CHARTS ROW 1 -->
+      <div id="ch-row-1" class="ch-grid c3">
+        <div class="ch-panel">
+          <div class="ch-header"><span class="ch-title">By GMNS Theme</span><span class="ch-sub"></span><button class="ch-download" data-chart="ch-theme">&#x2B07;</button></div>
+          <div class="ch-wrap" style="height:220px;position:relative"><canvas id="ch-theme"></canvas></div>
+        </div>
+        <div class="ch-panel">
+          <div class="ch-header"><span class="ch-title">Open vs Closed</span><span class="ch-sub"></span><button class="ch-download" data-chart="ch-status">&#x2B07;</button></div>
+          <div class="ch-wrap" style="height:220px;position:relative"><canvas id="ch-status"></canvas></div>
+        </div>
+        <div class="ch-panel">
+          <div class="ch-header"><span class="ch-title">Age Distribution</span><span class="ch-sub"></span><button class="ch-download" data-chart="ch-age">&#x2B07;</button></div>
+          <div class="ch-wrap" style="height:220px;position:relative"><canvas id="ch-age"></canvas></div>
+        </div>
+      </div>
+
+      <!-- CHARTS ROW 2 -->
+      <div id="ch-row-2" class="ch-grid c2">
+        <div class="ch-panel">
+          <div class="ch-header"><span class="ch-title">Top Owners</span><span class="ch-sub"></span><button class="ch-download" data-chart="ch-owner">&#x2B07;</button></div>
+          <div class="ch-wrap" style="height:220px;position:relative"><canvas id="ch-owner"></canvas></div>
+        </div>
+        <div class="ch-panel">
+          <div class="ch-header"><span class="ch-title">By Team (L2)</span><span class="ch-sub"></span><button class="ch-download" data-chart="ch-team">&#x2B07;</button></div>
+          <div class="ch-wrap" style="height:220px;position:relative"><canvas id="ch-team"></canvas></div>
+        </div>
+      </div>
+
+      <!-- CHARTS ROW 3 -->
+      <div id="ch-row-3" class="ch-grid c2">
+        <div class="ch-panel">
+          <div class="ch-header"><span class="ch-title">Top Markets</span><span class="ch-sub"></span><button class="ch-download" data-chart="ch-country">&#x2B07;</button></div>
+          <div class="ch-wrap" style="height:220px;position:relative"><canvas id="ch-country"></canvas></div>
+        </div>
+        <div class="ch-panel">
+          <div class="ch-header"><span class="ch-title">By Rating</span><span class="ch-sub"></span><button class="ch-download" data-chart="ch-rating">&#x2B07;</button></div>
+          <div class="ch-wrap" style="height:220px;position:relative"><canvas id="ch-rating"></canvas></div>
+        </div>
+      </div>
+
+      <!-- DATA QUALITY FLAGS -->
+      <div id="quality-row"></div>
+
+      <!-- DRILLDOWN TABLE -->
+      <div id="table-section">
+        <div class="table-toolbar">
+          <div class="table-toolbar-left">
+            <span class="table-title">Drilldown</span>
+            <span class="table-count" id="table-count"></span>
+          </div>
+          <div class="table-search">
+            <input type="text" id="table-search-input" placeholder="Search ID, title, owner, theme, market...">
+          </div>
+          <div class="table-toolbar-right">
+            <button class="table-export-btn" id="export-csv-btn">Export CSV</button>
+            <button class="table-export-btn" id="export-xls-btn">Export Excel</button>
+          </div>
+        </div>
+        <div class="table-wrapper">
+          <table id="data-table">
+            <thead id="table-head"></thead>
+            <tbody id="table-body"></tbody>
+          </table>
+        </div>
+        <div class="table-pagination">
+          <span class="pagination-info" id="pagination-info"></span>
+          <div class="pagination-controls" id="pagination-controls"></div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- TAB: CLASSIFIER -->
+    <div id="tab-classifier" class="tab-panel" style="display:none">
+      <div class="clf-controls">
+        <div class="clf-heading">
+          <h2>Data Issue Classifier</h2>
+          <p>AI-powered &middot; AEMP 79 &middot; KB v2</p>
+        </div>
+        <div class="clf-controls-right">
+          <span class="clf-record-count" id="clf-record-count">0 records loaded</span>
+          <button id="clf-run-btn">&#x25B6; Run Classification</button>
+          <button id="clf-download-btn">&#x2B07; Download Results</button>
+          <button id="clf-cancel-btn">Cancel</button>
+        </div>
+      </div>
+
+      <div id="clf-progress-section">
+        <div class="clf-progress-bar"><div id="clf-progress-fill"></div></div>
+        <div id="clf-progress-label">Classifying 0 / 0 records... (0%)</div>
+        <div class="clf-sub-label">Using claude-haiku-4-5-20251001 &middot; 3 parallel batches of 8</div>
+      </div>
+
+      <div class="clf-view-toggle">
+        <button class="clf-view-btn active" data-clf-view="summary">Summary View</button>
+        <button class="clf-view-btn" data-clf-view="detail">Full Detail View</button>
+      </div>
+
+      <div class="clf-filter-bar">
+        <span class="clf-filter-label">Data Issue:</span>
+        <select class="clf-filter-select" id="clf-filter-data-issue">
+          <option value="">All</option><option value="YES">YES</option><option value="NO">NO</option>
+        </select>
+        <span class="clf-filter-label">Confidence:</span>
+        <select class="clf-filter-select" id="clf-filter-confidence">
+          <option value="">All</option><option value="HIGH">HIGH</option><option value="MEDIUM">MEDIUM</option><option value="LOW">LOW</option>
+        </select>
+        <span class="clf-filter-label">Manual Review:</span>
+        <select class="clf-filter-select" id="clf-filter-review">
+          <option value="">All</option><option value="YES">Required</option><option value="NO">Not Required</option>
+        </select>
+        <input type="text" class="clf-filter-select" id="clf-search" placeholder="Search ID or title..." style="margin-left:auto">
+      </div>
+
+      <div class="clf-table-wrap">
+        <table class="clf-table" id="clf-table">
+          <thead id="clf-table-head"></thead>
+          <tbody id="clf-table-body"></tbody>
+        </table>
+        <div id="clf-empty" style="padding:40px;text-align:center;color:var(--text3)">
+          Run classification to see results
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: AI ASSISTANT -->
+    <div id="tab-assistant" class="tab-panel" style="display:none">
+      <div class="assistant-layout">
+        <div class="assistant-left">
+          <div class="assistant-title">GMNS AI Assistant</div>
+          <div class="assistant-subtitle">Ask questions about your data</div>
+          <div class="quick-actions">
+            <button class="quick-action-btn" data-prompt="What's new this month?">What's new this month?</button>
+            <button class="quick-action-btn" data-prompt="Show all overdue high-risk items">Show overdue high-risk items</button>
+            <button class="quick-action-btn" data-prompt="Which owners have the most open issues?">Owners with most open issues</button>
+            <button class="quick-action-btn" data-prompt="Summarise Financial Crimes OREs">Summarise Financial Crimes OREs</button>
+            <button class="quick-action-btn" data-prompt="Which items need manual review?">Items needing manual review</button>
+            <button class="quick-action-btn" data-prompt="What are the top data quality issues?">Top data quality issues</button>
+          </div>
+          <div class="assistant-summary" id="assistant-summary">
+            <div class="assistant-summary-title">File Summary</div>
+            <div class="assistant-summary-row"><span class="label">Total:</span><span class="val" id="as-summ-total">0</span></div>
+            <div class="assistant-summary-row"><span class="label">ORE:</span><span class="val" id="as-summ-ore">0</span></div>
+            <div class="assistant-summary-row"><span class="label">Issues:</span><span class="val" id="as-summ-issue">0</span></div>
+            <div class="assistant-summary-row"><span class="label">Open:</span><span class="val" id="as-summ-open">0</span></div>
+            <div class="assistant-summary-row"><span class="label">Overdue:</span><span class="val" id="as-summ-overdue">0</span></div>
+            <div class="assistant-summary-row"><span class="label">New this month:</span><span class="val" id="as-summ-new">0</span></div>
+          </div>
+        </div>
+        <div class="assistant-main">
+          <div class="assistant-messages" id="assistant-messages"></div>
+          <div id="assistant-typing" class="hidden"><div class="typing-dots"><span></span><span></span><span></span></div></div>
+          <div class="assistant-input-row">
+            <textarea class="assistant-input" id="assistant-input" rows="1" placeholder="Ask a question about your data..."></textarea>
+            <button class="assistant-send-btn" id="assistant-send-btn">Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- DEEP DIVE PANEL -->
+  <div id="deep-dive-panel">
+    <div class="dd-header">
+      <div class="dd-header-left">
+        <div class="dd-id" id="dd-id"></div>
+        <div class="dd-title" id="dd-title"></div>
+      </div>
+      <button class="dd-close" id="dd-close-btn">&times;</button>
+    </div>
+    <div class="dd-tabs">
+      <button class="dd-tab active" data-dd-tab="record">Record</button>
+      <button class="dd-tab" data-dd-tab="classification">Classification</button>
+      <button class="dd-tab" data-dd-tab="chat">Chat</button>
+    </div>
+    <div class="dd-content" id="dd-content-record"></div>
+    <div class="dd-content hidden" id="dd-content-classification"></div>
+    <div class="dd-content hidden" id="dd-content-chat">
+      <div class="dd-chat-history" id="dd-chat-history"></div>
+      <div class="dd-typing hidden" id="dd-typing"><div class="dd-typing-dots"><span></span><span></span><span></span></div></div>
+      <div class="dd-chat-input-row">
+        <textarea class="dd-chat-input" id="dd-chat-input" rows="1" placeholder="Ask about this record..."></textarea>
+        <button class="dd-send-btn" id="dd-send-btn">Send</button>
+      </div>
+      <button class="dd-download-conv" id="dd-download-conv-btn">&#x2B07; Download Conversation</button>
+    </div>
+  </div>
+
+  <!-- BACKDROP -->
+  <div id="dd-backdrop"></div>
+
+</body>
+<script>
+// ── CONFIG ─────────────────────────────────────────────────────
+const WORKER_URL = 'https://nameless-bonus-b666.freelancedataentryjobs2020.workers.dev/'; // REPLACE after deploying worker
+const MODEL      = 'claude-haiku-4-5-20251001';
+const BATCH_SIZE = 8;    // records per classification API call
+const CONCURRENCY = 3;   // max parallel API calls
+const PAGE_SIZE  = 25;   // dashboard table rows per page
+
+// ── STATE ──────────────────────────────────────────────────────
+const STATE = {
+  // Data
+  oreRecords:   [],
+  issueRecords: [],
+  allRecords:   [],
+  filtered:     [],
+
+  // Bitmap indexes for O(1) filtering
+  indexes: {
+    status:      new Map(),
+    rating:      new Map(),
+    gmns_theme:  new Map(),
+    owner:       new Map(),
+    country:     new Map(),
+    age_bucket:  new Map(),
+    record_type: new Map(),
+    month_key:   new Map(),
+  },
+
+  // Active filter values
+  filters: { type:'', status:'', rating:'', theme:'', owner:'', market:'', age:'' },
+
+  // Classifier
+  classifierResults:  [],
+  classifierRunning:  false,
+  classifierProgress: 0,
+
+  // UI
+  activeTab:   'dashboard',
+  view:        'combined',
+  sortCol:     'identification_date',
+  sortDir:     'desc',
+  page:        1,
+  searchTerm:  '',
+
+  // Deep dive
+  deepDiveRecord:       null,
+  deepDiveChatHistory:  [],
+
+  // Assistant
+  assistantHistory: [],
+  fileSummary:      null,
+
+  // Chart instances
+  charts: {},
+
+  // File metadata
+  fileName:     '',
+  currentMonth: null,
+  newThisMonth: [],
+};
+
+// ── CREATE PARSER WORKER ───────────────────────────────────────
+function createParserWorker() {
+  const workerCode = `
+    importScripts('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+
+    const EXCEL_EPOCH_MS = new Date('1899-12-30').getTime();
+
+    function excelSerialToDate(serial) {
+      if (typeof serial !== 'number' || serial < 1 || serial > 2958465) return null;
+      const adjusted = serial > 60 ? serial - 1 : serial;
+      const d = new Date(EXCEL_EPOCH_MS + adjusted * 86400000);
+      return isNaN(d.getTime()) ? null : d;
+    }
+
+    function parseDate(v) {
+      if (v == null || v === '') return null;
+      if (typeof v === 'number') return excelSerialToDate(v);
+      if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
+      const s = String(v).trim();
+      if (!s) return null;
+      const d = new Date(s);
+      return isNaN(d.getTime()) ? null : d;
+    }
+
+    const DATE_FIELDS = new Set([
+      'identification_date','capture_due_date','occurrence_date'
+    ]);
+
+    const THEME_MAP = {
+      'benefits':'Benefit and Rewards',
+      'benefit and rewards':'Benefit and Rewards',
+      'customer billing & payments':'Billing and Payments',
+      'billing and payments':'Billing and Payments',
+      'customer management':'Merchant Management',
+      'merchant management':'Merchant Management',
+      'financial crimes':'Financial Crimes',
+      'financial crimes (aml, anti-corruption & sanctions)':'Financial Crimes',
+      'aml/cft operations / sor':'Financial Crimes',
+      'aml/cft operations/sor':'Financial Crimes',
+      'cdd/kyc':'Financial Crimes',
+      'screening':'Financial Crimes',
+      'pricing':'Financial Crimes',
+      'offers':'Benefit and Rewards',
+      'offer fulfillment issue':'Merchant Management',
+      'offer set up issue':'Merchant Management',
+      'reward set up issue':'Benefit and Rewards',
+      'rewards':'Benefit and Rewards',
+      'partner/vendor management':'Merchant Management',
+      'partner/vendor setup/agreement issues':'Merchant Management',
+      'merchant setup/agreement issues':'Merchant Management',
+      'regulatory & financial reporting':'Reporting',
+      'regulatory requests and reporting':'Reporting',
+      'reporting':'Reporting',
+      'first line risk management':'Risk Management',
+      'risk assessment':'Risk Management',
+      'risk management':'Risk Management',
+      'customer account servicing':'Billing and Payments',
+      'statement & settlement issues':'Billing and Payments',
+      'statement credit':'Billing and Payments',
+      'transactions':'Billing and Payments',
+      'unknown':'Others',
+      'colleague management':'Others',
+      'communication':'Others',
+      'customer privacy':'Others',
+      'incorrect collection practices':'Others',
+      'policy and program':'Others',
+    };
+
+    function mapTheme(v) {
+      if (!v) return 'Others';
+      const k = String(v).toLowerCase().trim().replace(/\\s+/g,' ');
+      return THEME_MAP[k] || 'Others';
+    }
+
+    const ORE_MAP = {
+      'ORE ID':'ore_id','ORE Title':'title','ORE Description':'description',
+      'OS Name Level 1':'team_l1','OS Name Level 2':'team_l2','OS Name Level 3':'team_l3',
+      'ORE Status (Derived)':'status','ORE Owner':'owner',
+      'Accountable Executive':'accountable_exec',
+      'Business Unit Control Manager':'bucm',
+      'ORE Theme':'source_theme','ORE Sub Theme':'sub_theme',
+      'ORE Type Level 1':'type_l1','ORE Type Level 2':'type_l2',
+      'ORE Country Occurred':'country',
+      'Impacted Legal Entities':'legal_entities',
+      'ORE Rating':'rating',
+      'Is there an Ongoing Impact?':'ongoing_impact',
+      'Stop Ongoing Impact Description':'ongoing_impact_desc',
+      'Preliminary Root Cause Analysis':'root_cause_analysis',
+      'ORE Identification Date':'identification_date',
+      'ORE Occurrence Start Date':'occurrence_date',
+      'ORE Capture Due Date':'capture_due_date',
+      'Total Actual Financial Amount (USD)':'financial_amount_usd',
+      'Total Loss Outcome (USD)':'loss_usd',
+      'Past Due':'past_due',
+      'Risk Pillar':'risk_pillar','Risk Level 2':'risk_level2',
+      'Data':'data_flag','Privacy':'privacy_flag',
+    };
+
+    const ISS_MAP = {
+      'Issue ID':'ore_id','Issue Title':'title','Issue Description':'description',
+      'Issue Owner':'owner',
+      'Issue Owner Business Unit (L1)':'team_l1',
+      'Issue Owner Business Unit (L2)':'team_l2',
+      'Issue Owner Business Unit (L3)':'team_l3',
+      'Issue Accountable Executive':'accountable_exec',
+      'Business Unit Control Manager (BUCM)':'bucm',
+      'Issue Status':'status','Issue Status Rating':'rating',
+      'Issue Theme':'source_theme','Issue Sub Theme':'sub_theme',
+      'Impacted Countries':'country',
+      'Impacted Legal Entities':'legal_entities',
+      'Issue Identification Date':'identification_date',
+      'Issue Sustainability Current Target Date':'capture_due_date',
+      'Root Cause Theme':'root_cause_theme',
+      'Root Cause Sub Theme':'root_cause_sub_theme',
+      'Preliminary Root Cause Analysis':'root_cause_analysis',
+      'Is this a Repeat Issue?':'is_repeat',
+      'Will Regulator Track This Issue?':'regulator_tracking',
+      'Past Due':'past_due',
+      'Failed Validation':'failed_validation',
+      'Long Dated':'long_dated',
+      'New Red/Amber':'new_red_amber',
+      'Risk Level 2':'risk_level2',
+      'Data':'data_flag','Privacy':'privacy_flag',
+    };
+
+    const ORE_DETECT  = ['ORE ID','ORE Title','ORE Status (Derived)','ORE Owner','ORE Theme'];
+    const ISS_DETECT  = ['Issue ID','Issue Title','Issue Status','Issue Owner','Issue Theme'];
+
+    function detectSheetType(headers) {
+      const h = new Set(headers.map(x => String(x||'').trim()));
+      const oreScore = ORE_DETECT.filter(c => h.has(c)).length;
+      const issScore = ISS_DETECT.filter(c => h.has(c)).length;
+      if (oreScore >= 2 && oreScore >= issScore) return 'ORE';
+      if (issScore >= 2) return 'DATA_ISSUE';
+      return null;
+    }
+
+    function buildColIdx(headers, mapping) {
+      const idx = {};
+      const lower = headers.map(h => String(h||'').toLowerCase().trim());
+      for (const [src, tgt] of Object.entries(mapping)) {
+        let i = headers.findIndex(h => String(h||'').trim() === src);
+        if (i === -1) i = lower.indexOf(src.toLowerCase());
+        if (i !== -1) idx[tgt] = i;
+      }
+      return idx;
+    }
+
+    const TODAY_MS = Date.now();
+
+    function ageBucket(days) {
+      if (days == null || isNaN(days)) return 'Unknown';
+      if (days < 0)   return 'Future';
+      if (days <= 30)  return '0-30 days';
+      if (days <= 60)  return '31-60 days';
+      if (days <= 90)  return '61-90 days';
+      if (days <= 180) return '91-180 days';
+      return '180+ days';
+    }
+
+    function yesValues(v) {
+      return ['yes','y','true','1'].includes(String(v||'').toLowerCase().trim());
+    }
+
+    function deriveRecord(r) {
+      const status = String(r.status||'').toLowerCase();
+      const rating = String(r.rating||'').toLowerCase();
+      r.is_open    = status.includes('open');
+      r.is_closed  = status.includes('closed');
+      r.is_high    = rating.includes('high') || rating.includes('red');
+      r.is_medium  = rating.includes('medium') || rating.includes('amber');
+
+      const idate = r.identification_date instanceof Date ? r.identification_date : null;
+      r.age_days   = idate ? Math.floor((TODAY_MS - idate.getTime()) / 86400000) : null;
+      r.age_bucket = ageBucket(r.age_days);
+      r.month_key  = idate
+        ? idate.getFullYear() + '-' + String(idate.getMonth()+1).padStart(2,'0')
+        : null;
+
+      r.is_past_due = yesValues(r.past_due);
+      if (!r.is_past_due && r.capture_due_date instanceof Date && r.is_open) {
+        r.is_past_due = r.capture_due_date.getTime() < TODAY_MS;
+      }
+
+      r.is_due_soon = false;
+      if (r.capture_due_date instanceof Date && r.is_open) {
+        const d = Math.floor((r.capture_due_date.getTime() - TODAY_MS) / 86400000);
+        r.is_due_soon = d >= 0 && d <= 14;
+      }
+
+      r.gmns_theme         = mapTheme(r.source_theme);
+      r.missing_owner      = !String(r.owner||'').trim();
+      r.missing_theme      = !String(r.source_theme||'').trim();
+      r.missing_country    = !String(r.country||'').trim();
+      r.missing_root_cause = r.record_type === 'DATA_ISSUE' && !String(r.root_cause_theme||'').trim();
+      r.data_flagged       = yesValues(r.data_flag);
+      r.privacy_flagged   = yesValues(r.privacy_flag);
+      r.country_list       = String(r.country||'').split(/[,;]/).map(x=>x.trim()).filter(Boolean);
+      r.ongoing_impact_flag = yesValues(r.ongoing_impact);
+    }
+
+    function processSheet(wb, sheetName) {
+      const sheet = wb.Sheets[sheetName];
+      if (!sheet || !sheet['!ref']) return [];
+
+      const aoa = XLSX.utils.sheet_to_json(sheet, {
+        header: 1, defval: null, raw: true, cellDates: false,
+        sheetStubs: false, bookVBA: false,
+      });
+      if (!aoa || aoa.length < 2) return [];
+
+      const headers = (aoa[0]||[]).map(h => h==null?'':String(h).trim());
+      const type = detectSheetType(headers);
+      if (!type) return [];
+
+      const mapping = type === 'ORE' ? ORE_MAP : ISS_MAP;
+      const colIdx  = buildColIdx(headers, mapping);
+      const records = [];
+
+      for (let i = 1; i < aoa.length; i++) {
+        const row = aoa[i];
+        if (!row || !row.some(c => c != null && c !== '')) continue;
+
+        const r = { record_type: type };
+        for (const [field, idx] of Object.entries(colIdx)) {
+          const v = row[idx];
+          if (v == null) { r[field] = ''; continue; }
+          if (DATE_FIELDS.has(field)) {
+            r[field] = parseDate(v);
+          } else {
+            r[field] = v;
+          }
+        }
+
+        r.ore_id = String(r.ore_id || r.issue_id || (type+'-'+i)).trim();
+        deriveRecord(r);
+        records.push(r);
+
+        // Progressive chunk every 100 records
+        if (records.length % 100 === 0) {
+          self.postMessage({
+            type: 'chunk',
+            records: records.slice(records.length - 100),
+            sheetType: type,
+          });
+        }
+      }
+      return records;
+    }
+
+    self.onmessage = function(e) {
+      const { buffer } = e.data;
+      try {
+        self.postMessage({ type: 'status', message: 'Reading workbook...' });
+        const wb = XLSX.read(new Uint8Array(buffer), {
+          type: 'array', raw: true, cellDates: false,
+          sheetStubs: false, bookVBA: false,
+        });
+
+        const allRecords = [];
+        const meta = { sheets: [], oreCount: 0, issueCount: 0 };
+
+        for (const sheetName of wb.SheetNames) {
+          self.postMessage({ type: 'status', message: 'Parsing "' + sheetName + '"...' });
+          const records = processSheet(wb, sheetName);
+          if (!records.length) continue;
+          allRecords.push(...records);
+          const t = records[0].record_type;
+          meta.sheets.push({ name: sheetName, type: t, count: records.length });
+          if (t === 'ORE') meta.oreCount += records.length;
+          else meta.issueCount += records.length;
+        }
+
+        self.postMessage({ type: 'done', records: allRecords, meta });
+      } catch(err) {
+        self.postMessage({ type: 'error', message: err.message });
+      }
+    };
+  `;
+
+  const blob = new Blob([workerCode], { type: 'application/javascript' });
+  return new Worker(URL.createObjectURL(blob));
+}
+
+function parseFile(file) {
+  return new Promise((resolve, reject) => {
+    const worker = createParserWorker();
+    const accumulated = [];
+
+    worker.onmessage = (e) => {
+      const { type, records, meta, message } = e.data;
+      if (type === 'status') {
+        setLoadingMessage(message);
+      } else if (type === 'chunk') {
+        accumulated.push(...records);
+        if (accumulated.length >= 50) {
+          partialRender(accumulated);
+        }
+      } else if (type === 'done') {
+        worker.terminate();
+        resolve({ records, meta });
+      } else if (type === 'error') {
+        worker.terminate();
+        reject(new Error(message));
+      }
+    };
+
+    worker.onerror = (err) => {
+      worker.terminate();
+      reject(new Error(err.message));
+    };
+
+    file.arrayBuffer().then(buf => {
+      worker.postMessage({ buffer: buf }, [buf]);
+    }).catch(reject);
+  });
+}
+
+async function onFileLoaded({ records, meta }) {
+  STATE.oreRecords   = records.filter(r => r.record_type === 'ORE');
+  STATE.issueRecords = records.filter(r => r.record_type === 'DATA_ISSUE');
+  STATE.allRecords   = records;
+  STATE.filtered     = [...records];
+  STATE.fileName     = meta.fileName || '';
+
+  buildBitmapIndexes(records);
+  detectCurrentMonth(records);
+  buildFileSummary();
+
+  renderApp();
+  renderNewThisMonth();
+  populateFilters();
+  applyFilters();
+  hideLoading();
+}
+
+function partialRender(records) {
+  // Called during progressive loading to show early data
+  if (STATE.filtered.length === 0 || STATE.allRecords.length === 0) {
+    STATE.filtered = [...records];
+    renderKPIs();
+    renderTable();
+  }
+}
+
+// ── BITMAP INDEX FUNCTIONS ─────────────────────────────────────
+function buildBitmapIndexes(records) {
+  const fields = ['status','rating','gmns_theme','owner','country',
+                  'age_bucket','record_type','month_key'];
+
+  for (const f of fields) {
+    STATE.indexes[f] = new Map();
+  }
+
+  for (let i = 0; i < records.length; i++) {
+    const r = records[i];
+    for (const f of fields) {
+      const v = String(r[f] || '(blank)');
+      if (!STATE.indexes[f].has(v)) STATE.indexes[f].set(v, []);
+      STATE.indexes[f].get(v).push(i);
+    }
+  }
+}
+
+function getFilteredRecords() {
+  const f = STATE.filters;
+  const fieldMap = {
+    type: 'record_type', status: 'status', rating: 'rating',
+    theme: 'gmns_theme', owner: 'owner', market: 'country', age: 'age_bucket',
+  };
+
+  let base;
+  if (STATE.view === 'ore')    base = STATE.oreRecords;
+  else if (STATE.view === 'issue') base = STATE.issueRecords;
+  else base = STATE.allRecords;
+
+  const activeFilters = Object.entries(fieldMap).filter(([k]) => f[k]);
+  if (!activeFilters.length) return base;
+
+  const baseIds = new Set(base.map(r => r.ore_id));
+
+  let result = null;
+  for (const [filterKey, fieldKey] of activeFilters) {
+    const val = f[filterKey];
+    const indices = STATE.indexes[fieldKey]?.get(val) || [];
+    const matching = new Set(
+      indices.map(i => STATE.allRecords[i]).filter(r => baseIds.has(r.ore_id))
+    );
+    if (result === null) {
+      result = matching;
+    } else {
+      for (const r of result) {
+        if (!matching.has(r)) result.delete(r);
+      }
+    }
+  }
+
+  return result ? [...result] : base;
+}
+
+// ── UPLOAD SCREEN EVENT HANDLERS ────────────────────────────────
+let selectedFile = null;
+let detectedSheets = [];
+
+function initUploadScreen() {
+  const dropZone = document.getElementById('drop-zone');
+  const fileInput = document.getElementById('file-input');
+  const loadBtn = document.getElementById('load-btn');
+  const fileArea = document.getElementById('file-area');
+
+  dropZone.addEventListener('click', () => fileInput.click());
+
+  dropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropZone.classList.add('drag-over');
+  });
+
+  dropZone.addEventListener('dragleave', () => {
+    dropZone.classList.remove('drag-over');
+  });
+
+  dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file) handleFileSelect(file);
+  });
+
+  fileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) handleFileSelect(file);
+  });
+
+  loadBtn.addEventListener('click', () => {
+    if (selectedFile) processFiles(selectedFile);
+  });
+}
+
+function handleFileSelect(file) {
+  selectedFile = file;
+  const loadBtn = document.getElementById('load-btn');
+  const fileArea = document.getElementById('file-area');
+  const errorEl = document.getElementById('upload-error');
+  errorEl.textContent = '';
+
+  fileArea.innerHTML = `
+    <div class="file-badge">
+      ${escapeHtml(file.name)}
+      <button class="remove-file" onclick="removeSelectedFile()">&times;</button>
+    </div>
+  `;
+
+  // Peek at sheet names
+  peekSheets(file).then(sheets => {
+    detectedSheets = sheets;
+    if (sheets.length > 0) {
+      fileArea.innerHTML += `
+        <div class="sheet-preview">
+          ${sheets.map(s => `
+            <div class="sheet-item">
+              <span>${s.type === 'ORE' ? '&#12850;' : '&#128500;'}</span>
+              <strong>${escapeHtml(s.name)}</strong>
+              &mdash; ${s.count} rows (${s.type})
+            </div>
+          `).join('')}
+        </div>
+      `;
+      loadBtn.style.display = 'inline-flex';
+    } else {
+      loadBtn.style.display = 'none';
+      document.getElementById('upload-error').textContent =
+        'No recognisable ORE or Data Issue sheets found. Check the file format.';
+    }
+  }).catch(err => {
+    loadBtn.style.display = 'none';
+    document.getElementById('upload-error').textContent = 'Error reading file: ' + err.message;
+  });
+}
+
+function removeSelectedFile() {
+  selectedFile = null;
+  detectedSheets = [];
+  document.getElementById('file-area').innerHTML = '';
+  document.getElementById('load-btn').style.display = 'none';
+  document.getElementById('upload-error').textContent = '';
+  document.getElementById('file-input').value = '';
+}
+
+async function peekSheets(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(new Uint8Array(e.target.result), {
+          type: 'array', raw: true, cellDates: false
+        });
+        const sheets = [];
+        for (const name of wb.SheetNames) {
+          const sheet = wb.Sheets[name];
+          if (!sheet || !sheet['!ref']) continue;
+          const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true });
+          if (!aoa || aoa.length < 2) continue;
+          const headers = (aoa[0]||[]).map(h=>String(h||'').trim());
+          const oreScore = ['ORE ID','ORE Title','ORE Status (Derived)','ORE Owner','ORE Theme']
+            .filter(c => new Set(headers).has(c)).length;
+          const issScore = ['Issue ID','Issue Title','Issue Status','Issue Owner','Issue Theme']
+            .filter(c => new Set(headers).has(c)).length;
+          let type = null;
+          if (oreScore >= 2 && oreScore >= issScore) type = 'ORE';
+          else if (issScore >= 2) type = 'DATA_ISSUE';
+          if (type) sheets.push({ name, type, count: aoa.length - 1 });
+        }
+        resolve(sheets);
+      } catch(err) {
+        reject(err);
+      }
+    };
+    reader.onerror = () => reject(new Error('File read error'));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function processFiles(file) {
+  showLoading('Reading workbook...');
+  try {
+    const result = await parseFile(file);
+    result.meta.fileName = file.name;
+    await onFileLoaded(result);
+  } catch(err) {
+    hideLoading();
+    document.getElementById('upload-error').textContent = 'Parse error: ' + err.message;
+  }
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+
+// ── RESET AND UTILITY FUNCTIONS ──────────────────────────────────
+function resetApp() {
+  for (const c of Object.values(STATE.charts)) { try { c.destroy(); } catch(e){} }
+
+  Object.assign(STATE, {
+    oreRecords:[], issueRecords:[], allRecords:[], filtered:[],
+    indexes:{ status:new Map(), rating:new Map(), gmns_theme:new Map(),
+              owner:new Map(), country:new Map(), age_bucket:new Map(),
+              record_type:new Map(), month_key:new Map() },
+    filters:{ type:'', status:'', rating:'', theme:'', owner:'', market:'', age:'' },
+    classifierResults:[], classifierRunning:false, classifierProgress:0,
+    activeTab:'dashboard', view:'combined', sortCol:'identification_date',
+    sortDir:'desc', page:1, searchTerm:'',
+    deepDiveRecord:null, deepDiveChatHistory:[],
+    assistantHistory:[], fileSummary:null,
+    charts:{}, fileName:'', currentMonth:null, newThisMonth:[],
+  });
+
+  selectedFile = null;
+  detectedSheets = [];
+
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('upload-screen').style.display = 'flex';
+  document.getElementById('deep-dive-panel').classList.remove('open');
+  document.getElementById('dd-backdrop').style.display = 'none';
+  document.getElementById('file-area').innerHTML = '';
+  document.getElementById('load-btn').style.display = 'none';
+  document.getElementById('upload-error').textContent = '';
+  document.getElementById('file-input').value = '';
+  document.getElementById('ntm-pane').innerHTML = '';
+  document.getElementById('kpi-row').innerHTML = '';
+  document.getElementById('quality-row').innerHTML = '';
+  document.getElementById('table-body').innerHTML = '';
+  document.getElementById('clf-table-body').innerHTML = '';
+  document.getElementById('clf-table-head').innerHTML = '';
+  document.getElementById('clf-progress-section').style.display = 'none';
+  document.getElementById('clf-download-btn').style.display = 'none';
+  document.getElementById('clf-empty').style.display = 'block';
+  document.getElementById('assistant-messages').innerHTML = '';
+}
+
+function setLoadingMessage(msg) {
+  const el = document.getElementById('loading-msg');
+  if (el) el.textContent = msg;
+}
+
+function showLoading(msg) {
+  document.getElementById('loading-overlay').style.display = 'flex';
+  setLoadingMessage(msg || 'Processing...');
+}
+
+function hideLoading() {
+  document.getElementById('loading-overlay').style.display = 'none';
+}
+
+function renderApp() {
+  document.getElementById('upload-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  setActiveTab('dashboard');
+  updateMetaBar();
+}
+
+function updateMetaBar() {
+  const el = document.getElementById('meta-info');
+  if (el) el.textContent =
+    `${STATE.fileName} · ${STATE.oreRecords.length} ORE · ${STATE.issueRecords.length} Issues`;
+}
+
+function setActiveTab(tabName) {
+  STATE.activeTab = tabName;
+  document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
+  const panel = document.getElementById('tab-' + tabName);
+  if (panel) panel.style.display = 'block';
+  document.querySelectorAll('.topbar-tab').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === tabName);
+  });
+  if (tabName === 'classifier') {
+    const el = document.getElementById('clf-record-count');
+    if (el) el.textContent = STATE.allRecords.length + ' records loaded';
+  }
+  if (tabName === 'assistant' && !STATE.assistantHistory.length) {
+    initAssistantGreeting();
+  }
+}
+
+// ── INIT ON PAGE LOAD ───────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  initUploadScreen();
+
+  // Loading spinner CSS injection
+  const spinner = document.getElementById('loading-spinner');
+  if (spinner) {
+    spinner.style.cssText = 'width:40px;height:40px;border:3px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;';
+    const style = document.createElement('style');
+    style.textContent = '@keyframes spin{to{transform:rotate(360deg)}}';
+    document.head.appendChild(style);
+  }
+
+  // Deep Dive panel close button
+  const ddClose = document.getElementById('dd-close-btn');
+  if (ddClose) ddClose.addEventListener('click', closeDeepDive);
+
+  // Deep Dive backdrop close
+  const ddBackdrop = document.getElementById('dd-backdrop');
+  if (ddBackdrop) ddBackdrop.addEventListener('click', closeDeepDive);
+
+  // Deep Dive internal tab switching
+  document.querySelectorAll('.dd-tab').forEach(function(tab) {
+    tab.addEventListener('click', function() { switchDDTab(tab.dataset.ddTab); });
+  });
+
+  // Deep Dive send button
+  const ddSend = document.getElementById('dd-send-btn');
+  if (ddSend) ddSend.addEventListener('click', sendDeepDiveChat);
+
+  // Deep Dive input Enter key
+  const ddInput = document.getElementById('dd-chat-input');
+  if (ddInput) {
+    ddInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendDeepDiveChat();
+      }
+    });
+  }
+
+  // Deep Dive download conversation
+  const ddDownload = document.getElementById('dd-download-conv-btn');
+  if (ddDownload) ddDownload.addEventListener('click', downloadDeepDivePDF);
+
+  // Deep Dive: clarifying query chips (event delegation on classification content)
+  const ddClfContent = document.getElementById('dd-content-classification');
+  if (ddClfContent) {
+    ddClfContent.addEventListener('click', function(e) {
+      var chip = e.target.closest('.dd-query-chip');
+      if (chip) {
+        var q = chip.dataset.q || chip.textContent;
+        var input = document.getElementById('dd-chat-input');
+        if (input) {
+          input.value = q;
+          switchDDTab('chat');
+          input.focus();
+        }
+      }
+    });
+  }
+
+  // AI Assistant send button
+  const asSend = document.getElementById('assistant-send-btn');
+  if (asSend) asSend.addEventListener('click', sendChat);
+
+  // AI Assistant input Enter key (Shift+Enter for newline)
+  const asInput = document.getElementById('assistant-input');
+  if (asInput) {
+    asInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendChat();
+      }
+      asInput.style.height = 'auto';
+      asInput.style.height = Math.min(asInput.scrollHeight, 120) + 'px';
+    });
+  }
+
+  // AI Assistant quick action buttons
+  document.querySelectorAll('.quick-action-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var input = document.getElementById('assistant-input');
+      if (input) {
+        input.value = btn.dataset.prompt;
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      }
+    });
+  });
+
+  // Override setActiveTab to init assistant greeting on first open
+  const origSetActiveTab = window.setActiveTab;
+  var assistantInited = false;
+  window.setActiveTab = function(tabName) {
+    origSetActiveTab(tabName);
+    if (tabName === 'assistant' && !assistantInited && STATE.fileSummary) {
+      assistantInited = true;
+      initAssistantGreeting();
+    }
+  };
+});
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION I: NEW THIS MONTH
+// ═══════════════════════════════════════════════════════════════
+function detectCurrentMonth(records) {
+  const counts = new Map();
+  for (const r of records) {
+    if (r.month_key) counts.set(r.month_key, (counts.get(r.month_key)||0)+1);
+  }
+  if (!counts.size) { STATE.currentMonth = null; STATE.newThisMonth = []; return; }
+  const sorted = [...counts.entries()].sort((a,b) => b[0].localeCompare(a[0]));
+  STATE.currentMonth = sorted[0][0];
+  STATE.newThisMonth = records.filter(r => r.month_key === STATE.currentMonth);
+}
+
+function renderNewThisMonth() {
+  const pane = document.getElementById('ntm-pane');
+  if (!pane) return;
+
+  const items = STATE.newThisMonth;
+  const monthKey = STATE.currentMonth;
+  if (!items.length || !monthKey) {
+    pane.innerHTML = '';
+    return;
+  }
+
+  const [year, month] = monthKey.split('-');
+  const monthName = new Date(year, month - 1)
+    .toLocaleString('default', { month: 'long' }) + ' ' + year;
+
+  const oreCount = items.filter(r => r.record_type === 'ORE').length;
+  const issueCount = items.filter(r => r.record_type === 'DATA_ISSUE').length;
+  const highCount = items.filter(r => r.is_high).length;
+  const themes = [...new Set(items.map(r => r.gmns_theme).filter(Boolean))].slice(0, 3).join(', ');
+
+  pane.innerHTML = `
+    <div class="ntm-header" id="ntm-header" onclick="toggleNTM()">
+      <div class="ntm-header-left">
+        <span class="ntm-month">${monthName}</span>
+        <span class="ntm-badge">${items.length} new</span>
+        <span class="ntm-meta">${oreCount} ORE &middot; ${issueCount} Issues${highCount ? ' &middot; ' + highCount + ' High Risk' : ''}${themes ? ' &middot; ' + themes : ''}</span>
+      </div>
+      <button class="ntm-toggle" id="ntm-toggle">&#9660; Show</button>
+    </div>
+    <div id="ntm-cards" style="display:none">
+      <div class="ntm-cards">
+        ${items.slice(0, 30).map(r => {
+          const idate = r.identification_date instanceof Date
+            ? r.identification_date.toLocaleDateString('en-GB', {day:'numeric',month:'short',year:'numeric'})
+            : 'N/A';
+          const age = r.age_days != null ? r.age_days + 'd ago' : '';
+          const typeLabel = r.record_type === 'ORE' ? 'ORE' : 'Issue';
+          const typeClass = r.record_type === 'ORE' ? 'badge-ore' : 'badge-issue';
+          const ratingClass = r.is_high ? 'badge-high' : r.is_medium ? 'badge-medium' : 'badge-low';
+          return `
+          <div class="ntm-card">
+            <div class="ntm-card-top">
+              <span class="ntm-card-id">${escapeHtml(r.ore_id)}</span>
+              <span class="badge ${typeClass}">${typeLabel}</span>
+            </div>
+            <div class="ntm-card-title">${escapeHtml(String(r.title||'').slice(0,80))}</div>
+            <div class="ntm-card-row">
+              <span class="badge ${ratingClass}">${escapeHtml(r.rating||'N/A')}</span>
+              <span style="font-size:0.78rem;color:var(--text3)">${escapeHtml(r.gmns_theme||'')}</span>
+              <span style="font-size:0.78rem;color:var(--text3);margin-left:auto">${escapeHtml((r.owner||'').slice(0,20))}</span>
+            </div>
+            <div class="ntm-card-row">
+              <span style="font-size:0.75rem;color:var(--text3)">${age} &middot; ${idate}</span>
+            </div>
+            <div class="ntm-card-actions">
+              <button class="ntm-card-btn classify" onclick="event.stopPropagation();jumpToClassifier('${escapeJs(r.ore_id)}')">Classify</button>
+              <button class="ntm-card-btn dive" onclick="event.stopPropagation();openDeepDive('${escapeJs(r.ore_id)}')">Deep Dive &#8594;</button>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function toggleNTM() {
+  const cards = document.getElementById('ntm-cards');
+  const toggle = document.getElementById('ntm-toggle');
+  if (!cards || !toggle) return;
+  const isHidden = cards.style.display === 'none';
+  cards.style.display = isHidden ? 'grid' : 'none';
+  toggle.innerHTML = isHidden ? '&#9650; Hide' : '&#9660; Show';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION J: FILTER BAR
+// ═══════════════════════════════════════════════════════════════
+function populateFilters() {
+  const records = STATE.allRecords;
+  const populate = (id, field, labelAll) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const vals = [...new Set(records.map(r => String(r[field]||'').trim()).filter(Boolean))];
+    if (vals.length < 2) { el.style.display = 'none'; return; }
+    el.style.display = '';
+    const sorted = vals.sort((a,b) => a.localeCompare(b));
+    el.innerHTML = `<option value="">${labelAll}</option>` +
+      sorted.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
+  };
+
+  populate('filter-type', 'record_type', 'All Types');
+  populate('filter-status', 'status', 'All Status');
+  populate('filter-rating', 'rating', 'All Ratings');
+  populate('filter-theme', 'gmns_theme', 'All Themes');
+  populate('filter-market', 'country', 'All Markets');
+  populate('filter-age', 'age_bucket', 'All Ages');
+
+  // Owner: top 20 by count
+  const ownerEl = document.getElementById('filter-owner');
+  if (ownerEl) {
+    const counts = {};
+    for (const r of records) {
+      const o = String(r.owner||'').trim();
+      if (o) counts[o] = (counts[o]||0) + 1;
+    }
+    const sorted = Object.entries(counts).sort((a,b) => b[1]-a[1]).slice(0,20);
+    if (sorted.length < 2) { ownerEl.style.display = 'none'; }
+    else {
+      ownerEl.style.display = '';
+      ownerEl.innerHTML = `<option value="">All Owners</option>` +
+        sorted.map(([v]) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
+    }
+  }
+}
+
+function refreshFilterDropdowns() {
+  // Called after applyFilters to narrow dropdowns based on filtered data
+  // For now, keep dropdowns as-is (they already filter via getFilteredRecords)
+}
+
+function renderFilterTags() {
+  const container = document.getElementById('filter-tags');
+  if (!container) return;
+  const f = STATE.filters;
+  const active = Object.entries(f).filter(([,v]) => v);
+  const count = active.length;
+
+  const badge = document.getElementById('filter-count');
+  if (badge) badge.style.display = count ? 'inline' : 'none';
+  if (badge) badge.textContent = count;
+
+  container.innerHTML = active.map(([k, v]) => {
+    const labels = {type:'Type',status:'Status',rating:'Rating',theme:'Theme',owner:'Owner',market:'Market',age:'Age'};
+    return `<span class="filter-tag">${labels[k]||k}: ${escapeHtml(v)} <button onclick="removeFilter('${k}')">&times;</button></span>`;
+  }).join('');
+}
+
+function removeFilter(key) {
+  STATE.filters[key] = '';
+  const el = document.getElementById('filter-' + key);
+  if (el) el.value = '';
+  applyFilters();
+}
+
+function clearFilters() {
+  STATE.filters = { type:'', status:'', rating:'', theme:'', owner:'', market:'', age:'' };
+  document.querySelectorAll('.filter-select').forEach(el => el.value = '');
+  applyFilters();
+}
+
+function applyFilters() {
+  STATE.filtered = getFilteredRecords();
+  STATE.page = 1;
+
+  // Apply search term if present
+  if (STATE.searchTerm) {
+    const term = STATE.searchTerm.toLowerCase();
+    STATE.filtered = STATE.filtered.filter(r =>
+      (r.ore_id||'').toLowerCase().includes(term) ||
+      (r.title||'').toLowerCase().includes(term) ||
+      (r.owner||'').toLowerCase().includes(term) ||
+      (r.gmns_theme||'').toLowerCase().includes(term) ||
+      (r.country||'').toLowerCase().includes(term)
+    );
+  }
+
+  renderFilterTags();
+  renderKPIs();
+  renderCharts();
+  renderQualityRow();
+  renderTable();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION K: KPI ROW
+// ═══════════════════════════════════════════════════════════════
+function renderKPIs() {
+  const container = document.getElementById('kpi-row');
+  if (!container) return;
+  const data = STATE.filtered;
+  const all = STATE.allRecords;
+  if (!all.length) { container.innerHTML = ''; return; }
+
+  const oreFiltered = data.filter(r => r.record_type === 'ORE');
+  const issFiltered = data.filter(r => r.record_type === 'DATA_ISSUE');
+  const open = data.filter(r => r.is_open).length;
+  const closed = data.filter(r => r.is_closed).length;
+  const overdue = data.filter(r => r.is_past_due).length;
+  const dueSoon = data.filter(r => r.is_due_soon).length;
+  const high = data.filter(r => r.is_high).length;
+  const ongoing = data.filter(r => r.ongoing_impact_flag).length;
+  const flagged = data.filter(r => r.data_flagged || r.privacy_flagged).length;
+
+  const ages = data.map(r => r.age_days).filter(d => d != null && !isNaN(d));
+  const avgAge = ages.length ? Math.round(ages.reduce((a,b)=>a+b,0)/ages.length) : 0;
+  const oldest = ages.length ? Math.max(...ages) : 0;
+
+  const pct = (n) => data.length ? Math.round(n/data.length*100) + '%' : '0%';
+
+  const cards = [
+    { label:'Total OREs', value:oreFiltered.length, sub:open+' open', cls:'blue' },
+    { label:'Total Issues', value:issFiltered.length, sub:issFiltered.filter(r=>r.is_open).length+' open', cls:'teal' },
+    { label:'Open', value:open, sub:pct(open), cls:'green' },
+    { label:'Closed', value:closed, sub:pct(closed), cls:'dark' },
+    { label:'Overdue', value:overdue, sub:'past due date', cls:'amber' },
+    { label:'Due in 14 Days', value:dueSoon, sub:'action required', cls:'amber' },
+    { label:'High Risk', value:high, sub:'high/red rated', cls:'red' },
+    { label:'Ongoing Impact', value:ongoing, sub:'active', cls:'red' },
+    { label:'Avg Age', value:avgAge+'d', sub:'oldest: '+oldest+'d', cls:'blue' },
+    { label:'Flagged', value:flagged, sub:'data/privacy', cls:'blue' },
+  ].filter(c => c.value > 0 || ['Total OREs','Total Issues'].includes(c.label));
+
+  container.innerHTML = cards.map(c => `
+    <div class="kpi-card ${c.cls}">
+      <div class="kpi-number">${c.value}</div>
+      <div class="kpi-label">${c.label}</div>
+      <div class="kpi-sub">${c.sub}</div>
+    </div>
+  `).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION L: CHARTS
+// ═══════════════════════════════════════════════════════════════
+const BASE_CHART_OPTIONS = {
+  responsive: true,
+  maintainAspectRatio: false,
+  animation: false,
+  plugins: {
+    legend: { display: false },
+    tooltip: {
+      backgroundColor: '#fff',
+      titleColor: '#1A2332',
+      bodyColor: '#4A5568',
+      borderColor: '#D4DDE8',
+      borderWidth: 1,
+      padding: 10,
+      cornerRadius: 6,
+    }
+  },
+  scales: {
+    x: { grid: { color: '#F3F4F6' }, ticks: { color: '#8E9BAD', font: { size: 10 } } },
+    y: { grid: { color: '#F3F4F6' }, ticks: { color: '#8E9BAD', font: { size: 10 } } },
+  }
+};
+
+const PAL = ['#006FCF','#1A7F4B','#C45E00','#7C3AED','#DC2626',
+             '#0891B2','#65A30D','#CA8A04','#DB2777','#0D9488'];
+
+function updateOrCreateChart(canvasId, type, labels, datasets, options) {
+  if (STATE.charts[canvasId]) {
+    const c = STATE.charts[canvasId];
+    c.data.labels = labels;
+    c.data.datasets = datasets;
+    c.update('none');
+  } else {
+    const ctx = document.getElementById(canvasId)?.getContext('2d');
+    if (!ctx) return;
+    STATE.charts[canvasId] = new Chart(ctx, {
+      type,
+      data: { labels, datasets },
+      options: { ...BASE_CHART_OPTIONS, ...options },
+    });
+  }
+}
+
+function countBy(data, field) {
+  const m = new Map();
+  for (const r of data) {
+    const v = String(r[field]||'(blank)');
+    m.set(v, (m.get(v)||0)+1);
+  }
+  return [...m.entries()].sort((a,b) => b[1]-a[1]);
+}
+
+function renderCharts() {
+  if (typeof requestIdleCallback === 'undefined') requestIdleCallback = (cb) => setTimeout(cb, 50);
+
+  requestIdleCallback(() => {
+    const data = STATE.filtered;
+
+    // Chart 1: By GMNS Theme (horizontal bar)
+    const themeData = countBy(data, 'gmns_theme').slice(0, 15);
+    showOrHideChart('ch-theme', themeData.length >= 2);
+    if (themeData.length >= 2) {
+      updateOrCreateChart('ch-theme', 'bar', {
+        indexAxis: 'y',
+        labels: themeData.map(([k]) => k),
+        datasets: [{ data: themeData.map(([,v]) => v), backgroundColor: PAL, borderWidth: 0 }]
+      });
+    }
+
+    // Chart 2: Open vs Closed (doughnut)
+    const openC = data.filter(r => r.is_open).length;
+    const closedC = data.filter(r => r.is_closed).length;
+    showOrHideChart('ch-status', (openC + closedC) >= 2);
+    if ((openC + closedC) >= 2) {
+      updateOrCreateChart('ch-status', 'doughnut', {
+        labels: ['Open', 'Closed'],
+        datasets: [{ data: [openC, closedC], backgroundColor: ['#1A7F4B', '#6B7280'], borderWidth: 0 }]
+      });
+    }
+
+    // Chart 3: Age Distribution (vertical bar)
+    const ageBuckets = ['0-30 days','31-60 days','61-90 days','91-180 days','180+ days'];
+    const ageCounts = ageBuckets.map(b => data.filter(r => r.age_bucket === b).length);
+    showOrHideChart('ch-age', ageCounts.some(c => c > 0));
+    if (ageCounts.some(c => c > 0)) {
+      updateOrCreateChart('ch-age', 'bar', {
+        labels: ageBuckets,
+        datasets: [{ data: ageCounts, backgroundColor: PAL[0], borderWidth: 0 }]
+      });
+    }
+
+    // Chart 4: Top Owners (horizontal bar)
+    const ownerData = countBy(data, 'owner').filter(([k]) => k !== '(blank)').slice(0, 15);
+    showOrHideChart('ch-owner', ownerData.length >= 2);
+    if (ownerData.length >= 2) {
+      updateOrCreateChart('ch-owner', 'bar', {
+        indexAxis: 'y',
+        labels: ownerData.map(([k]) => k.slice(0,25)),
+        datasets: [{ data: ownerData.map(([,v]) => v), backgroundColor: PAL, borderWidth: 0 }]
+      });
+    }
+
+    // Chart 5: By Team L2 (horizontal bar)
+    const teamData = countBy(data, 'team_l2').filter(([k]) => k !== '').slice(0, 15);
+    showOrHideChart('ch-team', teamData.length >= 2);
+    if (teamData.length >= 2) {
+      updateOrCreateChart('ch-team', 'bar', {
+        indexAxis: 'y',
+        labels: teamData.map(([k]) => k.slice(0,30)),
+        datasets: [{ data: teamData.map(([,v]) => v), backgroundColor: PAL, borderWidth: 0 }]
+      });
+    }
+
+    // Chart 6: Top Markets (horizontal bar)
+    const countryData = countBy(data, 'country').filter(([k]) => k !== '(blank)' && k !== '').slice(0, 15);
+    showOrHideChart('ch-country', countryData.length >= 2);
+    if (countryData.length >= 2) {
+      updateOrCreateChart('ch-country', 'bar', {
+        indexAxis: 'y',
+        labels: countryData.map(([k]) => k.slice(0,25)),
+        datasets: [{ data: countryData.map(([,v]) => v), backgroundColor: PAL, borderWidth: 0 }]
+      });
+    }
+
+    // Chart 7: By Rating (doughnut)
+    const ratingCounts = countBy(data, 'rating').filter(([k]) => k !== '');
+    const ratingColors = { high:'#C1202A', medium:'#C45E00', low:'#1A7F4B' };
+    showOrHideChart('ch-rating', ratingCounts.length >= 2);
+    if (ratingCounts.length >= 2) {
+      updateOrCreateChart('ch-rating', 'doughnut', {
+        labels: ratingCounts.map(([k]) => k),
+        datasets: [{
+          data: ratingCounts.map(([,v]) => v),
+          backgroundColor: ratingCounts.map(([k]) => ratingColors[k?.toLowerCase()] || '#6B7280'),
+          borderWidth: 0
+        }]
+      });
+    }
+  });
+}
+
+function showOrHideChart(canvasId, hasData) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const wrap = canvas.parentElement;
+  const noData = wrap.querySelector('.ch-no-data');
+  if (hasData) {
+    canvas.style.display = '';
+    if (noData) noData.style.display = 'none';
+  } else {
+    canvas.style.display = 'none';
+    if (!noData) {
+      const el = document.createElement('div');
+      el.className = 'ch-no-data';
+      el.textContent = 'Not enough data';
+      wrap.appendChild(el);
+    } else {
+      noData.style.display = '';
+    }
+  }
+}
+
+function downloadChart(canvasId, title) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const link = document.createElement('a');
+  link.download = title.replace(/\s+/g,'-') + '_' + new Date().toISOString().slice(0,10) + '.png';
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION M: DATA QUALITY FLAGS
+// ═══════════════════════════════════════════════════════════════
+function renderQualityRow() {
+  const container = document.getElementById('quality-row');
+  if (!container) return;
+  const data = STATE.filtered;
+
+  const counts = {
+    owner:   { label:'Missing Owner',       icon:'&#128100;', count: data.filter(r=>r.missing_owner).length, key:'owner', val:'(blank)' },
+    theme:   { label:'Missing Theme',       icon:'&#127912;', count: data.filter(r=>r.missing_theme).length, key:'theme', val:'' },
+    country: { label:'Missing Market',       icon:'&#127759;', count: data.filter(r=>r.missing_country).length, key:'market', val:'' },
+    root:    { label:'Missing Root Cause',  icon:'&#128269;', count: data.filter(r=>r.missing_root_cause).length, key:null, val:null },
+  };
+
+  container.innerHTML = Object.entries(counts).map(([k, v]) => `
+    <div class="quality-card ${v.count > 0 ? 'has-issues' : ''}"
+         ${v.key ? `onclick="filterByQuality('${k}')"` : ''} style="${v.key ? 'cursor:pointer' : 'cursor:default'}">
+      <div class="q-icon">${v.icon}</div>
+      <div class="q-info">
+        <div class="q-label">${v.label}</div>
+        <div class="q-count">${v.count}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function filterByQuality(key) {
+  const map = { owner:'owner', theme:'theme', country:'market' };
+  const valMap = { owner:'(blank)', theme:'(blank)', country:'(blank)' };
+  const el = document.getElementById('filter-' + map[key]);
+  if (el && el.style.display !== 'none') {
+    STATE.filters[map[key]] = valMap[key];
+    el.value = valMap[key];
+    applyFilters();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION N: DRILLDOWN TABLE
+// ═══════════════════════════════════════════════════════════════
+const TABLE_COLS = [
+  { key:'ore_id',          label:'ID',         w:120, mono:true },
+  { key:'title',           label:'Title',       w:200 },
+  { key:'record_type',     label:'Type',        w:70  },
+  { key:'owner',           label:'Owner',        w:130 },
+  { key:'team_l2',         label:'Team',        w:140 },
+  { key:'status',          label:'Status',       w:100 },
+  { key:'rating',          label:'Rating',      w:90  },
+  { key:'gmns_theme',      label:'GMNS Theme',  w:150 },
+  { key:'country',         label:'Market',      w:120 },
+  { key:'identification_date', label:'Identified', w:100 },
+  { key:'age_days',        label:'Age',         w:60  },
+  { key:'flags',           label:'Flags',        w:140 },
+];
+
+function renderTable() {
+  const thead = document.getElementById('table-head');
+  const tbody = document.getElementById('table-body');
+  const countEl = document.getElementById('table-count');
+  if (!thead || !tbody) return;
+
+  // Sort data
+  const data = [...STATE.filtered].sort((a, b) => {
+    let av = a[STATE.sortCol], bv = b[STATE.sortCol];
+    if (av instanceof Date) av = av.getTime();
+    if (bv instanceof Date) bv = bv.getTime();
+    if (av == null) av = '';
+    if (bv == null) bv = '';
+    const cmp = String(av).localeCompare(String(bv), undefined, { numeric: true });
+    return STATE.sortDir === 'desc' ? -cmp : cmp;
+  });
+
+  const total = data.length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  STATE.page = Math.min(STATE.page, totalPages);
+  const start = (STATE.page - 1) * PAGE_SIZE;
+  const pageData = data.slice(start, start + PAGE_SIZE);
+
+  if (countEl) countEl.textContent = STATE.filtered.length !== STATE.allRecords.length
+    ? `${STATE.filtered.length} of ${STATE.allRecords.length} records`
+    : `${total} records`;
+
+  // Header
+  thead.innerHTML = `<tr>${TABLE_COLS.map(col => {
+    const isActive = STATE.sortCol === col.key;
+    const icon = isActive ? (STATE.sortDir === 'asc' ? '&#9650;' : '&#9660;') : '';
+    return `<th class="${isActive ? 'active' : ''}" data-col="${col.key}" style="min-width:${col.w}px">${col.label} <span class="sort-icon">${icon}</span></th>`;
+  }).join('')}</tr>`;
+
+  // Body
+  tbody.innerHTML = pageData.map(r => {
+    const idate = r.identification_date instanceof Date
+      ? r.identification_date.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'2-digit'})
+      : '';
+    const flags = [];
+    if (r.is_past_due)  flags.push('<span class="badge badge-overdue">OVERDUE</span>');
+    if (r.is_high)      flags.push('<span class="badge badge-high">HIGH RISK</span>');
+    if (r.ongoing_impact_flag) flags.push('<span class="badge badge-ongoing">ONGOING</span>');
+    if (r.is_due_soon)  flags.push('<span class="badge badge-due-soon">DUE SOON</span>');
+    if (r.data_flagged || r.privacy_flagged) flags.push('<span class="badge badge-flagged">FLAGGED</span>');
+
+    const typeBadge = r.record_type === 'ORE'
+      ? '<span class="badge badge-ore">ORE</span>'
+      : '<span class="badge badge-issue">Issue</span>';
+
+    const ratingBadge = r.is_high ? '<span class="badge badge-high">'+escapeHtml(r.rating||'High')+'</span>'
+      : r.is_medium ? '<span class="badge badge-medium">'+escapeHtml(r.rating||'Medium')+'</span>'
+      : '<span class="badge badge-low">'+escapeHtml(r.rating||'Low')+'</span>';
+
+    const rowClass = r.data_issue === 'YES' ? 'has-issue' : '';
+
+    return `<tr class="${rowClass}" onclick="openDeepDive('${escapeJs(r.ore_id)}')">` +
+      `<td class="mono" style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.ore_id||'')}</td>` +
+      `<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(r.title||'')}">${escapeHtml(String(r.title||'').slice(0,50))}</td>` +
+      `<td>${typeBadge}</td>` +
+      `<td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.owner||'')}</td>` +
+      `<td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.team_l2||'')}</td>` +
+      `<td><span class="badge ${r.is_open ? 'badge-open' : 'badge-closed'}">${escapeHtml(r.status||'')}</span></td>` +
+      `<td>${ratingBadge}</td>` +
+      `<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.gmns_theme||'')}</td>` +
+      `<td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.country||'')}</td>` +
+      `<td style="white-space:nowrap">${idate}</td>` +
+      `<td>${r.age_days != null ? r.age_days + 'd' : ''}</td>` +
+      `<td>${flags.join(' ')}</td>` +
+      `</tr>`;
+  }).join('');
+
+  renderPagination(total, totalPages, start);
+}
+
+function renderPagination(total, totalPages, start) {
+  const info = document.getElementById('pagination-info');
+  const controls = document.getElementById('pagination-controls');
+  if (!info || !controls) return;
+
+  const cur = STATE.page;
+  const pages = [];
+  pages.push(1);
+  for (let p = Math.max(2, cur - 1); p <= Math.min(totalPages - 1, cur + 1); p++) {
+    if (p > 2 && p !== pages[pages.length-1] + 1) pages.push('...');
+    pages.push(p);
+  }
+  if (totalPages > 1 && pages[pages.length-1] !== totalPages) pages.push(totalPages);
+
+  const showFrom = total ? start + 1 : 0;
+  const showTo = Math.min(start + PAGE_SIZE, total);
+  info.textContent = `${showFrom}–${showTo} of ${total}`;
+
+  controls.innerHTML = `
+    <button class="page-btn" ${cur <= 1 ? 'disabled' : ''} onclick="go(${cur-1})">&#8592;</button>
+    ${pages.map(p => p === '...'
+      ? '<span style="padding:0 4px;color:var(--text3)">...</span>'
+      : `<button class="page-btn ${p === cur ? 'active' : ''}" onclick="go(${p})">${p}</button>`
+    ).join('')}
+    <button class="page-btn" ${cur >= totalPages ? 'disabled' : ''} onclick="go(${cur+1})">&#8594;</button>
+  `;
+}
+
+function go(page) {
+  STATE.page = page;
+  renderTable();
+}
+
+let searchTimeout = null;
+function onSearch(term) {
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(() => {
+    STATE.searchTerm = term;
+    applyFilters();
+  }, 200);
+}
+
+function sort(col) {
+  if (STATE.sortCol === col) {
+    STATE.sortDir = STATE.sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    STATE.sortCol = col;
+    STATE.sortDir = 'desc';
+  }
+  STATE.page = 1;
+  renderTable();
+}
+
+function escapeJs(str) {
+  return String(str).replace(/'/g, "\\'").replace(/\n/g, '\\n');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION T: DASHBOARD PDF + EXPORTS
+// ═══════════════════════════════════════════════════════════════
+async function downloadDashboardPDF() {
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const pageW = 287, margin = 10;
+
+  pdf.setFont('helvetica','bold');
+  pdf.setFontSize(14);
+  pdf.text('GMNS Risk Intelligence — Dashboard Export', margin, 18);
+  pdf.setFont('helvetica','normal');
+  pdf.setFontSize(9);
+  pdf.text(`File: ${STATE.fileName} · Generated: ${new Date().toLocaleString()}`, margin, 24);
+  pdf.text(`Records: ${STATE.allRecords.length} total · ${STATE.oreRecords.length} ORE · ${STATE.issueRecords.length} Issues`, margin, 29);
+
+  let y = 35;
+
+  const kpiEl = document.getElementById('kpi-section');
+  if (kpiEl) {
+    const canvas = await html2canvas(kpiEl, { scale: 1.5, backgroundColor:'#fff', logging:false });
+    const imgH = (canvas.height / canvas.width) * (pageW - 2*margin);
+    pdf.addImage(canvas.toDataURL('image/png'), 'PNG', margin, y, pageW-2*margin, Math.min(imgH, 45));
+    y += Math.min(imgH, 45) + 5;
+  }
+
+  for (const rowId of ['ch-row-1','ch-row-2','ch-row-3']) {
+    const el = document.getElementById(rowId);
+    if (!el || !el.children.length) continue;
+    if (y > 165) { pdf.addPage(); y = 15; }
+    const canvas = await html2canvas(el, { scale: 1.5, backgroundColor:'#fff', logging:false });
+    const imgH = (canvas.height / canvas.width) * (pageW - 2*margin);
+    const safeH = Math.min(imgH, 80);
+    pdf.addImage(canvas.toDataURL('image/png'), 'PNG', margin, y, pageW-2*margin, safeH);
+    y += safeH + 5;
+  }
+
+  pdf.save(`GMNS_Dashboard_${new Date().toISOString().slice(0,10)}.pdf`);
+}
+
+function exportCSV() {
+  const cols = TABLE_COLS.map(c => c.key);
+  const rows = STATE.filtered.map(r => cols.map(c => {
+    let v = r[c];
+    if (v instanceof Date) v = v.toISOString().slice(0,10);
+    v = String(v||'').replace(/"/g, '""');
+    return '"' + v + '"';
+  }));
+  const csv = [TABLE_COLS.map(c => '"' + c.label + '"').join(','), ...rows.map(r => r.join(','))].join('\n');
+  downloadBlob(csv, `GMNS_Data_${new Date().toISOString().slice(0,10)}.csv`, 'text/csv');
+}
+
+function exportXLS() {
+  const cols = TABLE_COLS.map(c => c.key);
+  const rows = STATE.filtered.map(r => cols.map(c => {
+    let v = r[c];
+    if (v instanceof Date) v = v.toISOString().slice(0,10);
+    return v || '';
+  }));
+  const ws = XLSX.utils.aoa_to_sheet([[...TABLE_COLS.map(c=>c.label)], ...rows]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Data');
+  const buf = XLSX.write(wb, { bookType:'xlsx', type:'array' });
+  downloadBlob(new Uint8Array(buf), `GMNS_Data_${new Date().toISOString().slice(0,10)}.xlsx`, 'application/octet-stream');
+}
+
+function downloadBlob(data, filename, type) {
+  const blob = data instanceof Uint8Array
+    ? new Blob([data], { type })
+    : new Blob([data], { type });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION Q: CLASSIFIER SYSTEM PROMPT
+// ═══════════════════════════════════════════════════════════════
+const CLASSIFIER_SYSTEM_PROMPT = `You are the GMNS Data Issue Classifier — Deterministic Engine Mode.
+
+ROLE: Analyze Operational Risk Events (OREs) and Data Issues. Determine Data Issue = YES / NO. Apply AEMP 79 / AEMP 70 aligned logic. Use strict evidence-based reasoning. Perform mandatory multi-field synthesis. Produce audit-ready structured output.
+
+CORE PRINCIPLE:
+A Data Issue = YES ONLY when there is explicit, confirmed evidence that data itself was impacted across: data usability, data availability, data integrity, or data confidentiality.
+Process failures, configuration errors, logic defects, control gaps, or financial impacts are NOT data issues unless they produce a confirmed data impact on the data itself.
+
+HARD GATE (evaluate BEFORE any other step):
+Ask: "Is there explicit, confirmed evidence that the underlying data itself was impacted?"
+
+Valid evidence of data impact (any one is sufficient):
+- Incorrect / invalid / inconsistent / duplicate data in a system
+- Missing data in a system of record
+- Data unavailable or inaccessible
+- Incorrect or incomplete data transfer
+- Unauthorized data disclosure
+- Data not fit for use
+- Retention or deletion failures
+
+If NONE of these → Data Issue = NO, Data Impact = NOT CONFIRMED, Taxonomy = N/A. Proceed to output with these values.
+If ANY confirmed → proceed through all steps below.
+
+HARD DECISION LOGIC:
+1. Process / configuration / logic / control failure only → NO
+2. Fix is configuration/logic only AND no data correction needed → NO
+3. Valid data rejected / not processed / misrouted (but no data corrupted) → NO
+4. Data incorrect / missing / unavailable / corrupted / exposed → YES
+
+Validation test: "Did the data itself change state, become unavailable, or become incorrect?"
+If NO → Data Issue = NO
+
+SIX CONDITIONS (A-F) — identify which data dimension was impacted:
+A - DATA QUALITY: Inaccuracies, gaps, missing values, duplicates, invalid records, anomalies. Always cite the DAMA sub-dimension: Accuracy | Completeness | Validity | Uniqueness | Consistency | Timeliness | Currency | Integrity
+B - DATA AVAILABILITY: Inaccessible, unavailable, or delayed data for business/reporting/regulatory/supervisory purposes
+C - DATA CONFIDENTIALITY: Data disclosed, shared, accessed, or tagged without appropriate authorization or required sensitivity classification
+D - ARCHITECTURE/MOVEMENT: Broken or incomplete data flows causing unreliable data. FFIEC rule: once third-party bad data enters internal AXP systems, AXP owns the data quality responsibility
+E - RETENTION/DELETION: Records not retained for required legal/business period OR not deleted within maximum allowable period under applicable law
+F - FIT FOR PURPOSE: Data does not meet business requirements for its intended use. DQ rules misaligned to consumption. Critical Data Elements not governed for consumption context. Data Stewardship accountability absent or inadequate.
+
+TAXONOMY (AEMP 79):
+L2: Data Risk
+  L3: Data Usability
+    L4: Data Quality | Data Stewardship | Fit for Purpose | Retention & Deletion
+  L3: Data Confidentiality
+    L4: Data Sensitivity | Data Sharing
+  L3: Data Availability & Integrity
+    L4: Data Architecture | Data Movement | Data Availability
+
+CONFIRMED NON-DATA PATTERNS — these are NOT data issues unless A-F independently confirmed:
+1. Third-party governance failure alone (AEMP 10 breach alone)
+2. KYC/AML monitoring gap where underlying data is intact
+3. Backlog/staffing/capacity issue — NEVER a data issue regardless of consequence
+4. Policy compliance oversight gap alone
+5. Contractual/relationship management failure alone
+6. UAT/testing failure where data output was correct
+7. Colleague conduct/training gap alone
+8. Process documentation/communication failure alone
+
+GMNS THEME MAPPING (exact match first, then semantic, then Others):
+Financial Crimes | Billing and Payments | Merchant Management | Benefit and Rewards | Reporting | Risk Management | Others
+
+ISSUE SUMMARY FORMAT (mandatory for every record, 4 lines):
+"A [failure type] occurred where [event]. This was caused by [root cause]. As a result, [impact]. Based on combined analysis of all inputs, [explicit statement whether data itself was impacted or not]."
+
+CLASSIFICATION RATIONALE RULES:
+- Minimum 4 sentences
+- Must reference at least 2 input fields
+- Must distinguish between process failure and data failure
+- Must include this exact sentence: "The classification is based on whether the underlying data itself was impacted, not the process or logic applied to it."
+
+MANUAL REVIEW RULES:
+- Data Issue = NO → Manual Review = YES, reason = "To be reviewed for validation that no data impact has been overlooked."
+- Data Issue = YES, Confidence = HIGH → Manual Review = NO, reason = "High confidence classification with confirmed data evidence."
+- Data Issue = YES, Confidence = MEDIUM or LOW → Manual Review = YES, reason = state specific ambiguity.
+
+CLARIFYING QUERIES:
+Generate exactly 3 to 5 questions per record covering: data correctness, availability, reconciliation, downstream impact. Make questions specific to the actual record content, not generic.
+
+ZERO-TOLERANCE RULES:
+- Copy ore_id, ore_title, owner, markets_impacted EXACTLY as they appear in input. No paraphrasing, no reformatting.
+- If a field is blank in input → output the literal string "Missing"
+- Process each record completely independently. No cross-record reasoning.
+- No hallucination. Only use information present in the input.
+- No markdown in output. No prose outside the JSON array.
+
+OUTPUT FORMAT:
+Return ONLY a valid JSON array. No markdown fences. No explanatory text. No preamble. The response must begin with [ and end with ].
+
+Each element must have EXACTLY these 17 fields in exactly this order:
+{
+  "ore_id": "exact copy from input",
+  "ore_title": "exact copy from input",
+  "issue_summary": "4-line format as specified above",
+  "owner": "exact copy from input",
+  "markets_impacted": "exact copy from input",
+  "root_cause_category": "Process/Configuration/Control/Human Error/Third-Party/Governance/Other",
+  "data_issue": "YES or NO",
+  "classification_rationale": "minimum 4 sentences including the mandatory line",
+  "data_impact": "CONFIRMED or POTENTIAL or NOT CONFIRMED",
+  "l2_l3_l4_taxonomy": "Data Risk → L3 → L4 (sub-dimension) or N/A",
+  "taxonomy_rationale": "explanation of taxonomy selection or N/A",
+  "gmns_theme": "one of the 7 GMNS themes",
+  "confidence": "HIGH or MEDIUM or LOW",
+  "confidence_rationale": "explanation of confidence level with evidence quality assessment",
+  "clarifying_queries": "Q1 text | Q2 text | Q3 text | Q4 text",
+  "manual_review": "YES or NO",
+  "manual_review_reason": "specific reason"
+}`;
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION R: CLASSIFIER RUNNER
+// ═══════════════════════════════════════════════════════════════
+let classifierAbortController = null;
+let clfView = 'summary'; // 'summary' or 'detail'
+let clfFilters = { dataIssue:'', confidence:'', review:'', search:'' };
+
+async function runClassifier() {
+  if (STATE.classifierRunning) return;
+  if (!STATE.allRecords.length) {
+    alert('No records loaded. Please upload a file first.');
+    return;
+  }
+
+  STATE.classifierRunning  = true;
+  STATE.classifierResults  = [];
+  STATE.classifierProgress = 0;
+  classifierAbortController = new AbortController();
+
+  showClassifierProgress(0, STATE.allRecords.length);
+  document.getElementById('clf-cancel-btn').style.display = 'inline-flex';
+  document.getElementById('clf-download-btn').style.display = 'none';
+  document.getElementById('clf-empty').style.display = 'none';
+
+  const records = STATE.allRecords;
+  const batches = [];
+  for (let i = 0; i < records.length; i += BATCH_SIZE) {
+    batches.push(records.slice(i, i + BATCH_SIZE));
+  }
+
+  let completed = 0;
+
+  async function processBatch(batch) {
+    if (classifierAbortController.signal.aborted) return [];
+
+    const items = batch.map(r => ({
+      ore_id:      String(r.ore_id || 'Missing'),
+      ore_title:   String(r.title  || 'Missing'),
+      description: String(r.description || 'Missing').slice(0, 1000),
+      owner:       String(r.owner  || 'Missing'),
+      markets_impacted: String(r.country || 'Missing'),
+      source_theme: String(r.source_theme || 'Missing'),
+      root_cause_analysis: String(r.root_cause_analysis || 'Missing'),
+      ongoing_impact_desc: String(r.ongoing_impact_desc || 'Missing'),
+      status:      String(r.status || 'Missing'),
+      rating:      String(r.rating || 'Missing'),
+      record_type: r.record_type,
+    }));
+
+    // Anthropic API format: system as top-level field
+    const response = await fetch(WORKER_URL, {
+      method: 'POST',
+      signal: classifierAbortController.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model:      MODEL,
+        max_tokens: 3500,
+        system:    CLASSIFIER_SYSTEM_PROMPT,
+        messages: [
+          {
+            role: 'user',
+            content: 'Classify the following ' + batch.length +
+                     ' records. Return a JSON array only. No markdown. No prose. Begin with [ :\n\n' +
+                     JSON.stringify(items, null, 2)
+          }
+        ]
+      })
+    });
+
+    if (!response.ok) throw new Error('Worker responded with ' + response.status);
+
+    const data = await response.json();
+    if (data.error) throw new Error(data.error.message || 'Anthropic API error');
+
+    // Anthropic response: data.content[0].text
+    const raw = data.content?.[0]?.text || '[]';
+
+    let parsed = [];
+    try {
+      const clean = raw
+        .replace(/^```json\s*/i, '')
+        .replace(/^```\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
+      parsed = JSON.parse(clean);
+      if (!Array.isArray(parsed)) parsed = [parsed];
+    } catch(e) {
+      parsed = batch.map(r => ({
+        ore_id: String(r.ore_id),
+        ore_title: String(r.title || ''),
+        issue_summary: 'Parse error — review manually',
+        owner: String(r.owner || 'Missing'),
+        markets_impacted: String(r.country || 'Missing'),
+        root_cause_category: 'Parse error',
+        data_issue: 'ERROR',
+        classification_rationale: 'JSON parse error for this batch. Manual review required.',
+        data_impact: 'NOT CONFIRMED',
+        l2_l3_l4_taxonomy: 'N/A',
+        taxonomy_rationale: 'N/A',
+        gmns_theme: String(r.gmns_theme || 'Others'),
+        confidence: 'LOW',
+        confidence_rationale: 'Parse error',
+        clarifying_queries: 'Manual review required due to parse error.',
+        manual_review: 'YES',
+        manual_review_reason: 'Parse error — review manually',
+      }));
+    }
+
+    // 17-field validation
+    const REQUIRED_FIELDS = [
+      'ore_id','ore_title','issue_summary','owner','markets_impacted',
+      'root_cause_category','data_issue','classification_rationale',
+      'data_impact','l2_l3_l4_taxonomy','taxonomy_rationale','gmns_theme',
+      'confidence','confidence_rationale','clarifying_queries',
+      'manual_review','manual_review_reason'
+    ];
+    parsed = parsed.map(r => {
+      const out = {};
+      for (const f of REQUIRED_FIELDS) {
+        out[f] = r[f] != null ? String(r[f]) : 'Missing';
+      }
+      return out;
+    });
+
+    return parsed;
+  }
+
+  async function runPool(batches, limit) {
+    let batchIndex = 0;
+    async function worker() {
+      while (batchIndex < batches.length) {
+        if (classifierAbortController.signal.aborted) return;
+        const i = batchIndex++;
+        try {
+          const results = await processBatch(batches[i]);
+          STATE.classifierResults.push(...results);
+          completed += batches[i].length;
+          showClassifierProgress(completed, records.length);
+          renderClassifierTable();
+        } catch(err) {
+          if (err.name === 'AbortError') return;
+          console.error('Batch error:', err);
+          completed += batches[i].length;
+          showClassifierProgress(completed, records.length);
+        }
+      }
+    }
+    await Promise.all(Array(Math.min(limit, batches.length)).fill(null).map(() => worker()));
+  }
+
+  try {
+    await runPool(batches, CONCURRENCY);
+    STATE.classifierRunning = false;
+    buildFileSummary();
+    document.getElementById('clf-cancel-btn').style.display = 'none';
+    document.getElementById('clf-download-btn').style.display = 'inline-flex';
+    renderClassifierTable();
+  } catch(err) {
+    STATE.classifierRunning = false;
+    document.getElementById('clf-cancel-btn').style.display = 'none';
+    showClassifierError(err.message);
+  }
+}
+
+function cancelClassification() {
+  if (classifierAbortController) classifierAbortController.abort();
+  STATE.classifierRunning = false;
+  setLoadingMessage('Classification cancelled.');
+}
+
+function showClassifierProgress(done, total) {
+  const pct = total ? Math.round(done / total * 100) : 0;
+  const fill = document.getElementById('clf-progress-fill');
+  const label = document.getElementById('clf-progress-label');
+  if (fill) fill.style.width = pct + '%';
+  if (label) label.textContent = `Classifying ${done} / ${total} records... (${pct}%)`;
+  document.getElementById('clf-progress-section').style.display = 'block';
+}
+
+function showClassifierError(msg) {
+  document.getElementById('clf-progress-section').style.display = 'none';
+  const empty = document.getElementById('clf-empty');
+  if (empty) {
+    empty.style.display = 'block';
+    empty.innerHTML = `<div style="color:var(--red);padding:20px;text-align:center">
+      Classification failed: ${escapeHtml(msg)}
+      <br><br><button onclick="runClassifier()" style="padding:8px 20px;background:var(--blue);color:white;border:none;border-radius:6px;cursor:pointer">Retry</button>
+    </div>`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RENDER CLASSIFIER TABLE
+// ═══════════════════════════════════════════════════════════════
+function renderClassifierTable() {
+  const thead = document.getElementById('clf-table-head');
+  const tbody = document.getElementById('clf-table-body');
+  const emptyEl = document.getElementById('clf-empty');
+  if (!tbody) return;
+
+  let results = [...STATE.classifierResults];
+
+  // Apply filters
+  const ff = clfFilters;
+  if (ff.dataIssue) results = results.filter(r => r.data_issue === ff.dataIssue);
+  if (ff.confidence) results = results.filter(r => r.confidence === ff.confidence);
+  if (ff.review)     results = results.filter(r => r.manual_review === ff.review);
+  if (ff.search) {
+    const term = ff.search.toLowerCase();
+    results = results.filter(r =>
+      (r.ore_id||'').toLowerCase().includes(term) ||
+      (r.ore_title||'').toLowerCase().includes(term)
+    );
+  }
+
+  if (!results.length && !STATE.classifierResults.length) {
+    if (emptyEl) { emptyEl.style.display = 'block'; emptyEl.textContent = 'Run classification to see results'; }
+    thead.innerHTML = '';
+    tbody.innerHTML = '';
+    return;
+  }
+
+  if (!results.length) {
+    thead.innerHTML = '';
+    tbody.innerHTML = '';
+    if (emptyEl) { emptyEl.style.display = 'block'; emptyEl.textContent = 'No results match the current filters.'; }
+    return;
+  }
+
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  if (clfView === 'summary') {
+    thead.innerHTML = `<tr>
+      <th style="min-width:100px">ORE/Issue ID</th>
+      <th style="min-width:180px">Title</th>
+      <th style="min-width:100px">Owner</th>
+      <th style="min-width:90px">Market</th>
+      <th style="min-width:80px">Data Issue</th>
+      <th style="min-width:70px">Conditions</th>
+      <th style="min-width:160px">L3 → L4 Taxonomy</th>
+      <th style="min-width:80px">Confidence</th>
+      <th style="min-width:80px">Manual Review</th>
+    </tr>`;
+
+    tbody.innerHTML = results.map(r => {
+      const isIssue = r.data_issue === 'YES';
+      const isReview = r.manual_review === 'YES';
+      const isLow = r.confidence === 'LOW';
+      const rowClass = (isIssue ? 'data-issue-row ' : '') + ((isReview || isLow) ? 'review-row' : '');
+      const conditions = extractConditions(r.issue_summary || '');
+      return `<tr class="${rowClass}" onclick="openDeepDive('${escapeJs(r.ore_id)}')">
+        <td class="mono" style="font-size:0.8rem">${escapeHtml(r.ore_id||'')}</td>
+        <td class="clf-wrap" title="${escapeHtml(r.ore_title||'')}">${escapeHtml(String(r.ore_title||'').slice(0,40))}</td>
+        <td>${escapeHtml(r.owner||'')}</td>
+        <td>${escapeHtml(r.markets_impacted||'')}</td>
+        <td><span class="${isIssue ? 'clf-data-yes' : 'clf-data-no'}">${r.data_issue||'?'}</span></td>
+        <td style="font-size:0.78rem">${conditions || 'NONE'}</td>
+        <td class="clf-wrap" title="${escapeHtml(r.l2_l3_l4_taxonomy||'')}">${escapeHtml(String(r.l2_l3_l4_taxonomy||'').slice(0,35))}</td>
+        <td><span class="clf-conf-${(r.confidence||'low').toLowerCase()}">${r.confidence||'?'}</span></td>
+        <td>${isReview ? '<span class="clf-manual-review">&#9888;</span>' : '<span class="clf-no-manual">&#10003;</span>'}</td>
+      </tr>`;
+    }).join('');
+
+  } else {
+    // Full detail view — 17 columns
+    thead.innerHTML = `<tr>
+      <th>ORE/Issue ID</th><th>Title</th><th>Issue Summary</th><th>Owner</th>
+      <th>Market</th><th>Root Cause</th><th>Data Issue</th><th>Classification Rationale</th>
+      <th>Data Impact</th><th>L2→L3→L4 Taxonomy</th><th>Taxonomy Rationale</th>
+      <th>GMNS Theme</th><th>Confidence</th><th>Confidence Rationale</th>
+      <th>Clarifying Queries</th><th>Manual Review</th><th>Manual Review Reason</th>
+    </tr>`;
+
+    tbody.innerHTML = results.map(r => {
+      const isIssue = r.data_issue === 'YES';
+      const isReview = r.manual_review === 'YES';
+      const isLow = r.confidence === 'LOW';
+      const rowClass = (isIssue ? 'data-issue-row ' : '') + ((isReview || isLow) ? 'review-row' : '');
+      return `<tr class="${rowClass}" onclick="openDeepDive('${escapeJs(r.ore_id)}')">
+        <td class="mono" style="font-size:0.8rem">${escapeHtml(r.ore_id||'')}</td>
+        <td class="clf-detail-wrap">${escapeHtml(r.ore_title||'')}</td>
+        <td class="clf-detail-wrap" style="max-width:220px">${escapeHtml(r.issue_summary||'').replace(/\n/g,'<br>')}</td>
+        <td>${escapeHtml(r.owner||'')}</td>
+        <td>${escapeHtml(r.markets_impacted||'')}</td>
+        <td>${escapeHtml(r.root_cause_category||'')}</td>
+        <td><span class="${isIssue ? 'clf-data-yes' : 'clf-data-no'}">${r.data_issue||'?'}</span></td>
+        <td class="clf-detail-wrap">${escapeHtml(r.classification_rationale||'').replace(/\n/g,'<br>').slice(0,300)}</td>
+        <td>${escapeHtml(r.data_impact||'')}</td>
+        <td class="clf-detail-wrap">${escapeHtml(r.l2_l3_l4_taxonomy||'')}</td>
+        <td class="clf-detail-wrap">${escapeHtml(r.taxonomy_rationale||'')}</td>
+        <td>${escapeHtml(r.gmns_theme||'')}</td>
+        <td><span class="clf-conf-${(r.confidence||'low').toLowerCase()}">${r.confidence||'?'}</span></td>
+        <td class="clf-detail-wrap">${escapeHtml(r.confidence_rationale||'')}</td>
+        <td class="clf-detail-wrap">${escapeHtml((r.clarifying_queries||'').replace(/\|/g,'\n'))}</td>
+        <td>${isReview ? '<span class="clf-manual-review">&#9888; Required</span>' : '<span class="clf-no-manual">&#10003; Not Required</span>'}</td>
+        <td class="clf-detail-wrap">${escapeHtml(r.manual_review_reason||'')}</td>
+      </tr>`;
+    }).join('');
+  }
+}
+
+function extractConditions(summary) {
+  if (!summary) return '';
+  const conditions = [];
+  const lower = summary.toLowerCase();
+  if (lower.includes('data quality') || lower.includes('inaccurate') || lower.includes('duplicate') || lower.includes('missing')) conditions.push('A');
+  if (lower.includes('unavailable') || lower.includes('inaccessible') || lower.includes('delayed')) conditions.push('B');
+  if (lower.includes('confidential') || lower.includes('disclosure') || lower.includes('unauthoriz')) conditions.push('C');
+  if (lower.includes('architecture') || lower.includes('movement') || lower.includes('transfer') || lower.includes('data flow')) conditions.push('D');
+  if (lower.includes('retention') || lower.includes('deletion')) conditions.push('E');
+  if (lower.includes('fit for purpose') || lower.includes('not meet')) conditions.push('F');
+  return conditions.join(', ');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// DOWNLOAD CLASSIFIER EXCEL
+// ═══════════════════════════════════════════════════════════════
+function downloadClassifierExcel() {
+  if (!STATE.classifierResults.length) return;
+
+  const HEADERS = [
+    'ORE/Issue ID','ORE Title','Issue Summary','Owner','Market(s) Impacted',
+    'Root Cause Category','Data Issue','Classification Rationale','Data Impact',
+    'L2 → L3 → L4 Taxonomy','Taxonomy Rationale','GMNS Theme','Confidence',
+    'Confidence Rationale','Clarifying Queries','Manual Review Required','Manual Review Reason'
+  ];
+  const FIELDS = [
+    'ore_id','ore_title','issue_summary','owner','markets_impacted',
+    'root_cause_category','data_issue','classification_rationale','data_impact',
+    'l2_l3_l4_taxonomy','taxonomy_rationale','gmns_theme','confidence',
+    'confidence_rationale','clarifying_queries','manual_review','manual_review_reason'
+  ];
+
+  const wb = XLSX.utils.book_new();
+
+  // Data sheet
+  const rows = STATE.classifierResults.map(r => FIELDS.map(f => r[f] || ''));
+  const ws = XLSX.utils.aoa_to_sheet([[...HEADERS], ...rows]);
+  ws['!cols'] = HEADERS.map((h,i) => ({ wch: [10,30,40,20,20,20,10,60,15,30,40,20,10,40,60,15,40][i] || 15 }));
+  XLSX.utils.book_append_sheet(wb, ws, 'Classification Results');
+
+  // Summary sheet
+  const dataIssues = STATE.classifierResults.filter(r => r.data_issue === 'YES');
+  const sumRows = [
+    ['GMNS Data Issue Classification Results'],
+    [''],
+    ['Generated', new Date().toLocaleString()],
+    ['File', STATE.fileName],
+    [''],
+    ['TOTALS',''],
+    ['Total Records Classified', STATE.classifierResults.length],
+    ['Data Issues (YES)', dataIssues.length],
+    ['Not Data Issues (NO)', STATE.classifierResults.filter(r => r.data_issue === 'NO').length],
+    [''],
+    ['QUALITY FLAGS',''],
+    ['Manual Review Required', STATE.classifierResults.filter(r => r.manual_review === 'YES').length],
+    ['Low Confidence', STATE.classifierResults.filter(r => r.confidence === 'LOW').length],
+    ['High Confidence', STATE.classifierResults.filter(r => r.confidence === 'HIGH').length],
+    [''],
+    ['BY GMNS THEME (Data Issues only)',''],
+    ...Object.entries(
+      dataIssues.reduce((acc, r) => { acc[r.gmns_theme] = (acc[r.gmns_theme]||0)+1; return acc; }, {})
+    ).sort((a,b) => b[1]-a[1]),
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_table(sumRows, true), 'Summary');
+
+  const buf = XLSX.write(wb, { bookType:'xlsx', type:'array' });
+  downloadBlob(new Uint8Array(buf), `GMNS_Classification_${new Date().toISOString().slice(0,10)}.xlsx`, 'application/octet-stream');
+}
+
+function jumpToClassifier(recordId) {
+  setActiveTab('classifier');
+  renderClassifierTable();
+  // Scroll to and highlight the row
+  setTimeout(() => {
+    const rows = document.querySelectorAll('#clf-table-body tr');
+    for (const row of rows) {
+      if (row.cells[0]?.textContent?.trim() === recordId) {
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        row.style.boxShadow = '0 0 0 2px var(--blue)';
+        setTimeout(() => row.style.boxShadow = '', 3000);
+        break;
+      }
+    }
+  }, 100);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// DEEP DIVE PANEL + AI ASSISTANT
+// ═══════════════════════════════════════════════════════════════
+
+const ASSISTANT_SYSTEM_PROMPT = `You are the GMNS Risk Intelligence Assistant, helping American Express GMNS Data Office risk managers analyse Operational Risk Events (OREs) and Data Issues.
+
+You have access to a structured summary of the currently uploaded file (injected below). When asked about specific items, reference the data. When classification results are available, use them.
+
+KNOWLEDGE CONTEXT:
+- OREs are Operational Risk Events tracked under AEMP 47
+- Data Issues are classified under AEMP 79 — they require confirmed evidence of data impact (quality, availability, confidentiality, or architecture/movement)
+- Six classification conditions: A=Data Quality, B=Availability, C=Confidentiality, D=Architecture/Movement, E=Retention/Deletion, F=Fit for Purpose
+- Eight non-data patterns exist that look like data issues but are not (backlog, AEMP10 breach alone, monitoring gap with intact data, etc.)
+- GMNS Themes: Financial Crimes, Billing and Payments, Merchant Management, Benefit and Rewards, Reporting, Risk Management, Others
+- BCBS 239 materiality applies to anything impacting risk/regulatory reporting or AML screening
+
+RESPONSE STYLE:
+- Be precise and concise — this is an enterprise governance tool
+- Reference specific record IDs when answering questions about specific items
+- Suggest next steps (escalation, manual review, remediation) where relevant
+- If asked about something not in the data, say so clearly
+`;
+
+function buildFileSummary() {
+  const recs = STATE.allRecords;
+  const themes = {};
+  const owners = {};
+  const ratings = {};
+  const monthlyNew = {};
+
+  for (const r of recs) {
+    themes[r.gmns_theme]  = (themes[r.gmns_theme]||0)+1;
+    owners[r.owner]       = (owners[r.owner]||0)+1;
+    ratings[r.rating]     = (ratings[r.rating]||0)+1;
+    if (r.month_key) monthlyNew[r.month_key] = (monthlyNew[r.month_key]||0)+1;
+  }
+
+  STATE.fileSummary = {
+    fileName:      STATE.fileName,
+    totalRecords:  recs.length,
+    oreCount:      STATE.oreRecords.length,
+    issueCount:    STATE.issueRecords.length,
+    openCount:     recs.filter(r=>r.is_open).length,
+    closedCount:   recs.filter(r=>r.is_closed).length,
+    overdueCount:  recs.filter(r=>r.is_past_due).length,
+    highRiskCount: recs.filter(r=>r.is_high).length,
+    dueSoonCount:  recs.filter(r=>r.is_due_soon).length,
+    newThisMonth:  STATE.newThisMonth.length,
+    currentMonth:  STATE.currentMonth,
+    themeBreakdown: Object.entries(themes).sort((a,b)=>b[1]-a[1]),
+    topOwners:     Object.entries(owners).sort((a,b)=>b[1]-a[1]).slice(0,15),
+    ratingBreakdown: Object.entries(ratings).sort((a,b)=>b[1]-a[1]),
+    monthlyTrend:  Object.entries(monthlyNew).sort((a,b)=>a[0].localeCompare(b[0])),
+    classifierSummary: STATE.classifierResults.length ? {
+      total:         STATE.classifierResults.length,
+      dataIssues:    STATE.classifierResults.filter(r=>r.data_issue==='YES').length,
+      notDataIssues: STATE.classifierResults.filter(r=>r.data_issue==='NO').length,
+      manualReview:  STATE.classifierResults.filter(r=>r.manual_review==='YES').length,
+      lowConfidence: STATE.classifierResults.filter(r=>r.confidence==='LOW').length,
+    } : null,
+  };
+
+  // Update AI assistant left panel summary card
+  const s = STATE.fileSummary;
+  const els = ['as-summ-total','as-summ-ore','as-summ-issue','as-summ-open','as-summ-overdue','as-summ-new'];
+  const vals = [s.totalRecords, s.oreCount, s.issueCount, s.openCount, s.overdueCount, s.newThisMonth];
+  els.forEach((id, i) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = vals[i];
+  });
+}
+
+async function callWorker(messages, maxTokens = 1000) {
+  let system = '';
+  let userMessages = messages;
+  if (messages.length && messages[0].role === 'system') {
+    system      = messages[0].content;
+    userMessages = messages.slice(1);
+  }
+
+  // Anthropic requires messages to strictly alternate user/assistant
+  const cleanMessages = [];
+  for (const msg of userMessages) {
+    if (msg.role !== 'user' && msg.role !== 'assistant') continue;
+    if (cleanMessages.length && cleanMessages[cleanMessages.length-1].role === msg.role) {
+      cleanMessages[cleanMessages.length-1].content += '\n\n' + msg.content;
+    } else {
+      cleanMessages.push({ role: msg.role, content: msg.content });
+    }
+  }
+
+  // Anthropic requires first message to be from user
+  if (!cleanMessages.length || cleanMessages[0].role !== 'user') {
+    cleanMessages.unshift({ role: 'user', content: 'Hello' });
+  }
+
+  try {
+    const res = await fetch(WORKER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model:      MODEL,
+        max_tokens: maxTokens,
+        system:     system,
+        messages:   cleanMessages,
+      })
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error('Worker error ' + res.status + ': ' + errText);
+    }
+
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message || 'Anthropic API error');
+    return data.content?.[0]?.text || '';
+
+  } catch(err) {
+    console.error('callWorker failed:', err);
+    return 'Error: ' + err.message + '. Check WORKER_URL in index.html and ANTHROPIC_API_KEY in Cloudflare.';
+  }
+}
+
+function buildDeepDiveSystemPrompt(record, classification) {
+  const recordContext = {
+    id:           record.ore_id,
+    title:        record.title,
+    description:  record.description,
+    type:         record.record_type,
+    status:       record.status,
+    rating:       record.rating,
+    source_theme: record.source_theme,
+    gmns_theme:   record.gmns_theme,
+    owner:        record.owner,
+    team_l2:      record.team_l2,
+    country:      record.country,
+    identification_date: record.identification_date instanceof Date
+      ? record.identification_date.toISOString().slice(0,10) : '',
+    age_days:     record.age_days,
+    is_past_due:  record.is_past_due,
+    ongoing_impact: record.ongoing_impact_flag,
+    root_cause_analysis: record.root_cause_analysis,
+    root_cause_theme: record.root_cause_theme,
+  };
+
+  return ASSISTANT_SYSTEM_PROMPT +
+    '\n\nRECORD IN FOCUS:\n' + JSON.stringify(recordContext, null, 2) +
+    (classification
+      ? '\n\nCLASSIFICATION FOR THIS RECORD:\n' + JSON.stringify(classification, null, 2)
+      : '\n\nNO CLASSIFICATION RUN YET FOR THIS RECORD.') +
+    '\n\nFILE SUMMARY (for cross-record context):\n' + JSON.stringify(STATE.fileSummary, null, 2);
+}
+
+function buildDeepDiveIntroMessage(record, classification) {
+  const lines = [
+    'I\'m reviewing **' + record.ore_id + '**: ' + record.title,
+    '',
+    '**Status:** ' + record.status + ' · **Rating:** ' + record.rating + ' · **Theme:** ' + record.gmns_theme + ' · **Age:** ' + (record.age_days != null ? record.age_days + ' days' : 'unknown'),
+  ];
+  if (classification) {
+    lines.push('**Classification:** ' + (classification.data_issue === 'YES' ? '✅ Data Issue' : '❌ Not a Data Issue') + ' · **Confidence:** ' + classification.confidence);
+    if (classification.data_issue === 'YES' && classification.l2_l3_l4_taxonomy && classification.l2_l3_l4_taxonomy !== 'N/A') {
+      lines.push('**Taxonomy:** ' + classification.l2_l3_l4_taxonomy);
+    }
+    lines.push('');
+    if (classification.classification_rationale && classification.classification_rationale !== 'Missing') {
+      lines.push(classification.classification_rationale);
+    }
+  } else {
+    lines.push('**Classification:** Not yet classified. Run the classifier first for AI-powered analysis.');
+  }
+  lines.push('');
+  lines.push('What would you like to explore?');
+  return lines.join('\n');
+}
+
+function renderDeepDiveChatMessages() {
+  const container = document.getElementById('dd-chat-history');
+  if (!container) return;
+  container.innerHTML = STATE.deepDiveChatHistory.map(msg => {
+    const isUser = msg.role === 'user';
+    return '<div class="dd-chat-msg ' + (isUser ? 'user' : 'ai') + '">' +
+      '<div class="dd-chat-role">' + (isUser ? 'You' : 'AI') + '</div>' +
+      '<div class="dd-chat-text">' + (isUser ? escapeHtml(msg.content) : msg.content) + '</div>' +
+    '</div>';
+  }).join('');
+  container.scrollTop = container.scrollHeight;
+}
+
+function showDeepDiveTyping(show) {
+  const el = document.getElementById('dd-typing');
+  if (el) el.classList.toggle('hidden', !show);
+  if (show) {
+    const container = document.getElementById('dd-chat-history');
+    if (container) container.scrollTop = container.scrollHeight;
+  }
+}
+
+async function sendDeepDiveChat() {
+  const input = document.getElementById('dd-chat-input');
+  if (!input) return;
+  const msg = input.value.trim();
+  if (!msg || !STATE.deepDiveRecord) return;
+  input.value = '';
+
+  STATE.deepDiveChatHistory.push({ role: 'user', content: msg });
+  renderDeepDiveChatMessages();
+
+  const classification = STATE.classifierResults.find(r => r.ore_id === STATE.deepDiveRecord.ore_id) || null;
+  const systemPrompt = buildDeepDiveSystemPrompt(STATE.deepDiveRecord, classification);
+
+  // Exclude auto-generated intro from API call (it's at index 0)
+  const historyForApi = STATE.deepDiveChatHistory.slice(1);
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    ...historyForApi
+  ];
+
+  showDeepDiveTyping(true);
+  const response = await callWorker(messages, 1200);
+  showDeepDiveTyping(false);
+
+  STATE.deepDiveChatHistory.push({ role: 'assistant', content: response });
+  renderDeepDiveChatMessages();
+}
+
+function renderDeepDivePanel(record, classification) {
+  const idEl = document.getElementById('dd-id');
+  const titleEl = document.getElementById('dd-title');
+  if (idEl) idEl.textContent = record.ore_id;
+  if (titleEl) titleEl.textContent = String(record.title || '').slice(0, 100);
+
+  // Record tab
+  const recordContent = document.getElementById('dd-content-record');
+  if (recordContent) {
+    const fields = [
+      ['Type', record.record_type],
+      ['Status', record.status],
+      ['Rating', record.rating],
+      ['Owner', record.owner],
+      ['Team L1', record.team_l1],
+      ['Team L2', record.team_l2],
+      ['GMNS Theme', record.gmns_theme],
+      ['Source Theme', record.source_theme],
+      ['Country', record.country],
+      ['Legal Entities', record.legal_entities],
+      ['Age', record.age_days != null ? record.age_days + ' days' : '—'],
+      ['Identified', record.identification_date instanceof Date ? record.identification_date.toLocaleDateString() : '—'],
+      ['Due Date', record.capture_due_date instanceof Date ? record.capture_due_date.toLocaleDateString() : '—'],
+      ['Past Due', record.is_past_due ? 'YES' : 'No'],
+      ['Ongoing Impact', record.ongoing_impact_flag ? 'YES' : 'No'],
+      ['Data Flagged', record.data_flagged ? 'YES' : 'No'],
+      ['Privacy Flagged', record.privacy_flagged ? 'YES' : 'No'],
+    ];
+    if (record.record_type === 'DATA_ISSUE') {
+      fields.push(['Root Cause Theme', record.root_cause_theme || '']);
+      fields.push(['Root Cause Sub Theme', record.root_cause_sub_theme || '']);
+      fields.push(['Regulator Tracking', record.regulator_tracking || '']);
+    }
+    recordContent.innerHTML = '<div class="dd-field-list">' + fields.map(function(kv) {
+      return '<div class="dd-field"><span class="dd-field-key">' + escapeHtml(kv[0]) + '</span><span class="dd-field-val">' + escapeHtml(String(kv[1]||'—')) + '</span></div>';
+    }).join('') + '</div>';
+  }
+
+  // Classification tab
+  const clfContent = document.getElementById('dd-content-classification');
+  if (clfContent) {
+    if (!classification || classification.data_issue === 'ERROR') {
+      clfContent.innerHTML = '<div class="dd-no-clf">No classification results yet. Run the classifier from the Classifier tab.</div>';
+    } else {
+      const queries = classification.clarifying_queries
+        ? classification.clarifying_queries.split('|').filter(function(q) { return q.trim(); })
+        : [];
+      const confClass = 'dd-clf-conf-' + (classification.confidence||'unknown').toLowerCase();
+      const hasReview = classification.manual_review === 'YES';
+      const hasDataIssue = classification.data_issue === 'YES';
+
+      clfContent.innerHTML = '<div class="dd-clf-fields">' +
+        '<div class="dd-clf-row"><span class="dd-clf-key">Data Issue</span><span class="dd-clf-val ' + (hasDataIssue ? 'dd-clf-yes' : 'dd-clf-no') + '">' + classification.data_issue + '</span></div>' +
+        '<div class="dd-clf-row"><span class="dd-clf-key">Data Impact</span><span class="dd-clf-val">' + escapeHtml(classification.data_impact || '—') + '</span></div>' +
+        '<div class="dd-clf-row"><span class="dd-clf-key">Taxonomy</span><span class="dd-clf-val">' + escapeHtml(classification.l2_l3_l4_taxonomy || '—') + '</span></div>' +
+        '<div class="dd-clf-row"><span class="dd-clf-key">Confidence</span><span class="dd-clf-val ' + confClass + '">' + (classification.confidence||'—') + '</span></div>' +
+        '<div class="dd-clf-row"><span class="dd-clf-key">GMNS Theme</span><span class="dd-clf-val">' + escapeHtml(classification.gmns_theme || '—') + '</span></div>' +
+        '<div class="dd-clf-row"><span class="dd-clf-key">Root Cause</span><span class="dd-clf-val">' + escapeHtml(classification.root_cause_category || '—') + '</span></div>' +
+        '<div class="dd-clf-row"><span class="dd-clf-key">Manual Review</span><span class="dd-clf-val ' + (hasReview ? 'dd-clf-warn' : 'dd-clf-ok') + '">' + (classification.manual_review||'—') + '</span></div>' +
+        '<div class="dd-clf-section-title">Issue Summary</div><div class="dd-clf-text">' + escapeHtml((classification.issue_summary||'—').replace(/\n/g,' ')) + '</div>' +
+        '<div class="dd-clf-section-title">Classification Rationale</div><div class="dd-clf-text">' + escapeHtml((classification.classification_rationale||'—').replace(/\n/g,' ')) + '</div>' +
+        '<div class="dd-clf-section-title">Confidence Rationale</div><div class="dd-clf-text">' + escapeHtml((classification.confidence_rationale||'—').replace(/\n/g,' ')) + '</div>' +
+        (queries.length ? '<div class="dd-clf-section-title">Clarifying Queries</div><div class="dd-query-chips">' + queries.map(function(q) {
+          return '<button class="dd-query-chip" data-q="' + escapeHtml(q.trim()) + '">' + escapeHtml(q.trim()) + '</button>';
+        }).join('') + '</div>' : '') +
+        (classification.manual_review_reason ? '<div class="dd-clf-section-title">Manual Review Reason</div><div class="dd-clf-text">' + escapeHtml(classification.manual_review_reason) + '</div>' : '') +
+      '</div>';
+    }
+  }
+}
+
+function switchDDTab(tab) {
+  document.querySelectorAll('.dd-tab').forEach(function(t) {
+    t.classList.toggle('active', t.dataset.ddTab === tab);
+  });
+  var recTab = document.getElementById('dd-content-record');
+  var clfTab = document.getElementById('dd-content-classification');
+  var chatTab = document.getElementById('dd-content-chat');
+  if (recTab) recTab.classList.toggle('hidden', tab !== 'record');
+  if (clfTab) clfTab.classList.toggle('hidden', tab !== 'classification');
+  if (chatTab) chatTab.classList.toggle('hidden', tab !== 'chat');
+}
+
+function openDeepDive(recordId) {
+  var record = STATE.allRecords.find(function(r) { return r.ore_id === recordId; });
+  if (!record) return;
+
+  var classification = STATE.classifierResults.find(function(r) { return r.ore_id === recordId; }) || null;
+
+  STATE.deepDiveRecord = record;
+  STATE.deepDiveChatHistory = [];
+
+  var introMsg = buildDeepDiveIntroMessage(record, classification);
+  STATE.deepDiveChatHistory = [{ role: 'assistant', content: introMsg }];
+
+  renderDeepDivePanel(record, classification);
+  renderDeepDiveChatMessages();
+  switchDDTab('record');
+
+  document.getElementById('deep-dive-panel').classList.add('open');
+  document.getElementById('dd-backdrop').style.display = 'block';
+}
+
+function closeDeepDive() {
+  document.getElementById('deep-dive-panel').classList.remove('open');
+  document.getElementById('dd-backdrop').style.display = 'none';
+  STATE.deepDiveRecord = null;
+  STATE.deepDiveChatHistory = [];
+}
+
+async function downloadDeepDivePDF() {
+  var r = STATE.deepDiveRecord;
+  if (!r) return;
+  var pdf = new window.jspdf.jsPDF('portrait', 'mm', 'a4');
+
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(13);
+  pdf.text('Deep Dive: ' + r.ore_id, 15, 20);
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(10);
+  pdf.text(String(r.title||'').slice(0,80), 15, 27);
+  pdf.setFontSize(8);
+  pdf.text('Generated: ' + new Date().toLocaleString() + ' · ' + r.record_type + ' · ' + r.status + ' · ' + r.rating, 15, 33);
+
+  var y = 42;
+  var lineH = 5;
+  var maxW = 180;
+
+  for (var i = 0; i < STATE.deepDiveChatHistory.length; i++) {
+    var msg = STATE.deepDiveChatHistory[i];
+    if (y > 270) { pdf.addPage(); y = 15; }
+    var isUser = msg.role === 'user';
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(8.5);
+    pdf.setTextColor(isUser ? [0x00, 0x6F, 0xCF] : [0x1A, 0x7F, 0x4B]);
+    pdf.text(isUser ? 'You' : 'AI Assistant', 15, y);
+    y += lineH;
+
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(8.5);
+    pdf.setTextColor(0x1A, 0x23, 0x32);
+    var lines = pdf.splitTextToSize(msg.content, maxW);
+    for (var j = 0; j < lines.length; j++) {
+      if (y > 275) { pdf.addPage(); y = 15; }
+      pdf.text(lines[j], 15, y);
+      y += lineH - 0.5;
+    }
+    y += 3;
+  }
+
+  pdf.save('DeepDive_' + r.ore_id + '_' + new Date().toISOString().slice(0,10) + '.pdf');
+}
+
+// AI Assistant tab functions
+function renderAssistantMessages() {
+  var container = document.getElementById('assistant-messages');
+  if (!container) return;
+  container.innerHTML = STATE.assistantHistory.map(function(msg) {
+    var isUser = msg.role === 'user';
+    return '<div class="as-msg ' + (isUser ? 'user' : 'ai') + '">' +
+      '<div class="as-msg-content">' + (isUser ? escapeHtml(msg.content) : msg.content) + '</div>' +
+    '</div>';
+  }).join('');
+  container.scrollTop = container.scrollHeight;
+}
+
+function showAssistantTyping(show) {
+  var el = document.getElementById('assistant-typing');
+  if (el) el.classList.toggle('hidden', !show);
+  if (show) {
+    var container = document.getElementById('assistant-messages');
+    if (container) setTimeout(function() { container.scrollTop = container.scrollHeight; }, 50);
+  }
+}
+
+async function sendChat() {
+  var input = document.getElementById('assistant-input');
+  if (!input) return;
+  var msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+  input.style.height = 'auto';
+
+  STATE.assistantHistory.push({ role: 'user', content: msg });
+  renderAssistantMessages();
+
+  var summaryJson = JSON.stringify(STATE.fileSummary, null, 2);
+  var clfSummary = STATE.classifierResults.length
+    ? '\n\nCLASSIFIER RESULTS SUMMARY:\n' + JSON.stringify(STATE.fileSummary.classifierSummary, null, 2)
+    : '';
+
+  var systemContent = ASSISTANT_SYSTEM_PROMPT + '\n\nFILE SUMMARY:\n' + summaryJson + clfSummary;
+
+  showAssistantTyping(true);
+  var response = await callWorker([
+    { role: 'system', content: systemContent },
+    ...STATE.assistantHistory
+  ], 1200);
+  showAssistantTyping(false);
+
+  STATE.assistantHistory.push({ role: 'assistant', content: response });
+  renderAssistantMessages();
+}
+
+function initAssistantGreeting() {
+  var s = STATE.fileSummary;
+  if (!s) return;
+  var parts = (STATE.currentMonth||'').split('-');
+  var monthName = STATE.currentMonth
+    ? new Date(parts[0], parts[1]-1).toLocaleString('default', {month:'long'}) + ' ' + parts[0]
+    : 'this period';
+  var greeting = 'Hello! I\'ve analysed your file **' + s.fileName + '** — ' + s.totalRecords + ' records (' + s.oreCount + ' ORE, ' + s.issueCount + ' Data Issues). There are ' + s.openCount + ' open items, ' + s.overdueCount + ' overdue, and ' + s.newThisMonth + ' new in ' + monthName + '.\n\nWhat would you like to explore?';
+  STATE.assistantHistory = [{ role: 'assistant', content: greeting }];
+  renderAssistantMessages();
+}
+</script>
+</html>
