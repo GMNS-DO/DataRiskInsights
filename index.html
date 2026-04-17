@@ -13,21 +13,21 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
 :root{
-  --bg:#12161c;
-  --surface:#191f27;
-  --surface-2:#1f2630;
-  --border:#2a3340;
-  --border-strong:#3a4555;
-  --text:#e4eaf3;
-  --text-dim:#8fa0b5;
-  --text-faint:#5e6b7a;
-  --accent:#3b8bff;
-  --accent-dim:#1e4f9e;
-  --ok:#3ed98c;
-  --warn:#f7a82b;
-  --danger:#ff5e6a;
+  --bg:#0b0d10;
+  --surface:#14181d;
+  --surface-2:#1a1f26;
+  --border:#252b33;
+  --border-strong:#323a45;
+  --text:#e7ecf2;
+  --text-dim:#9aa4b2;
+  --text-faint:#6b7480;
+  --accent:#2e77ff;
+  --accent-dim:#1a4da8;
+  --ok:#3dd68c;
+  --warn:#f5a623;
+  --danger:#ff5964;
   --high:#ff7e8a;
-  --shadow:0 1px 2px rgba(0,0,0,.2), 0 4px 16px rgba(0,0,0,.25);
+  --shadow:0 1px 2px rgba(0,0,0,.25), 0 4px 16px rgba(0,0,0,.3);
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
@@ -480,51 +480,12 @@ input,select{font-family:inherit;color:inherit}
   font-size:12px;
 }
 
-/* Scrollable chart body */
-.chart-body-wrap{position:relative;overflow-x:auto;overflow-y:hidden}
-.chart-body-wrap .chart-body{height:260px;min-width:100%}
-
-/* Chart download button */
-.chart-download-btn{
-  padding:3px 8px;
-  background:var(--surface-2);
-  border:1px solid var(--border);
-  border-radius:5px;
-  font-size:11px;
-  color:var(--text-dim);
-  cursor:pointer;
-  margin-left:auto;
-  transition:all .12s;
-  display:flex;
-  align-items:center;
-  gap:4px;
+/* DQ list table */
+.dq-table-scroll{
+  overflow-x:auto;
+  max-height:280px;
+  overflow-y:auto;
 }
-.chart-download-btn:hover{color:var(--text);border-color:var(--border-strong)}
-
-/* Window selector pills */
-.window-pills{display:flex;gap:4px;margin-left:auto}
-.window-pill{
-  padding:3px 10px;
-  border-radius:99px;
-  font-size:11px;
-  font-weight:500;
-  cursor:pointer;
-  background:var(--surface-2);
-  border:1px solid var(--border);
-  color:var(--text-dim);
-  transition:all .12s;
-}
-.window-pill:hover{color:var(--text);border-color:var(--border-strong)}
-.window-pill.active{background:var(--accent-dim);border-color:var(--accent);color:#fff}
-
-/* DQ card with rate bar */
-.dq-card-row{display:flex;align-items:center;gap:12px;width:100%}
-.dq-rate-bar-wrap{flex:1;height:4px;background:var(--border);border-radius:99px;overflow:hidden;min-width:60px}
-.dq-rate-bar{height:100%;border-radius:99px;transition:width .3s ease;background:var(--warn)}
-.dq-card-row:hover .dq-rate-bar-wrap{border-color:var(--border-strong)}
-
-/* DQ table */
-.dq-table-scroll{overflow-x:auto;max-height:280px;overflow-y:auto}
 .dq-empty{
   padding:16px;
   color:var(--text-faint);
@@ -836,7 +797,7 @@ table.data tbody td{
     <div class="view-toggle" id="view-toggle">
       <button data-view="all" class="active">All</button>
       <button data-view="ore">ORE only</button>
-      <button data-view="issue">Data Issues only</button>
+      <button data-view="issue">Issue only</button>
     </div>
     <button class="btn" id="btn-reset">&#8634; Reset</button>
     <button class="btn" id="btn-export-excel">&#9660; Excel</button>
@@ -854,11 +815,7 @@ table.data tbody td{
       <div class="ntm-header" id="ntm-header">
         <span class="ntm-chevron">&#9654;</span>
         <span class="ntm-title">Latest Issues</span>
-        <div class="window-pills" id="ntm-window-pills">
-          <button class="window-pill" data-days="30">30d</button>
-          <button class="window-pill active" data-days="90">90d</button>
-          <button class="window-pill" data-days="180">180d</button>
-        </div>
+        <span class="mono" style="font-size:11px;color:var(--text-faint)" id="ntm-sub">Last 90 days</span>
         <span class="ntm-count" id="ntm-count">0</span>
       </div>
       <div class="ntm-body" id="ntm-body">
@@ -866,8 +823,8 @@ table.data tbody td{
       </div>
     </div>
 
-    <!-- Completeness Flags -->
-    <div class="section-label">Completeness Flags</div>
+    <!-- Data Quality -->
+    <div class="section-label">Data Quality Flags</div>
     <div class="dq-grid" id="dq-grid"></div>
 
     <!-- Filters -->
@@ -880,13 +837,12 @@ table.data tbody td{
     <!-- Charts -->
     <div class="section-label">Analytics</div>
     <div class="charts-grid" id="charts-grid">
-      <div class="chart-card"><div class="chart-title-wrap"><span class="chart-title">Volume Trend</span><div class="trend-legend" id="trend-legend"></div><button class="chart-download-btn" data-chart="trend">&#8681; Download</button></div><div class="chart-body-wrap"><div class="chart-body"><canvas id="chart-trend"></canvas></div></div></div>
-      <div class="chart-card"><div class="chart-title-wrap"><span class="chart-title">GMNS Theme</span><button class="chart-download-btn" data-chart="theme">&#8681; Download</button></div><div class="chart-body-wrap"><div class="chart-body"><canvas id="chart-theme"></canvas></div></div></div>
-      <div class="chart-card"><div class="chart-title-wrap"><span class="chart-title">Open vs Closed</span><button class="chart-download-btn" data-chart="status">&#8681; Download</button></div><div class="chart-body-wrap"><div class="chart-body"><canvas id="chart-status"></canvas></div></div></div>
-      <div class="chart-card"><div class="chart-title-wrap"><span class="chart-title">Age Distribution</span><button class="chart-download-btn" data-chart="age">&#8681; Download</button></div><div class="chart-body-wrap"><div class="chart-body"><canvas id="chart-age"></canvas></div></div></div>
-      <div class="chart-card"><div class="chart-title-wrap"><span class="chart-title">Top Owners</span><button class="chart-download-btn" data-chart="owner">&#8681; Download</button></div><div class="chart-body-wrap"><div class="chart-body"><canvas id="chart-owner"></canvas></div></div></div>
-      <div class="chart-card"><div class="chart-title-wrap"><span class="chart-title">Impacted Markets</span><button class="chart-download-btn" data-chart="market">&#8681; Download</button></div><div class="chart-body-wrap"><div class="chart-body"><canvas id="chart-market"></canvas></div></div></div>
-      <div class="chart-card"><div class="chart-title-wrap"><span class="chart-title">Rating</span><button class="chart-download-btn" data-chart="rating">&#8681; Download</button></div><div class="chart-body-wrap"><div class="chart-body"><canvas id="chart-rating"></canvas></div></div></div>
+      <div class="chart-card"><div class="chart-title-wrap"><span class="chart-title">GMNS Theme</span></div><div class="chart-body"><canvas id="chart-theme"></canvas></div></div>
+      <div class="chart-card"><div class="chart-title-wrap"><span class="chart-title">Open vs Closed</span></div><div class="chart-body"><canvas id="chart-status"></canvas></div></div>
+      <div class="chart-card"><div class="chart-title-wrap"><span class="chart-title">Age Distribution</span></div><div class="chart-body"><canvas id="chart-age"></canvas></div></div>
+      <div class="chart-card"><div class="chart-title-wrap"><span class="chart-title">Top Owners</span></div><div class="chart-body"><canvas id="chart-owner"></canvas></div></div>
+      <div class="chart-card"><div class="chart-title-wrap"><span class="chart-title">Top Markets</span></div><div class="chart-body"><canvas id="chart-market"></canvas></div></div>
+      <div class="chart-card"><div class="chart-title-wrap"><span class="chart-title">Rating</span></div><div class="chart-body"><canvas id="chart-rating"></canvas></div></div>
     </div>
 
     <!-- Table -->
@@ -951,8 +907,7 @@ const STATE = {
   pageSize: 25,
   charts: {},
   fileName: '',
-  dqFilter: null,  // active DQ filter: 'owner'|'theme'|'market'|'rootCause'|null
-  ntmWindow: 90    // days window for Latest Issues panel
+  dqFilter: null  // active DQ filter: 'owner'|'theme'|'market'|'rootCause'|null
 };
 
 const FILTER_DIMENSIONS = [
@@ -1239,12 +1194,10 @@ function applyAll(){
 
   // DQ filter: clicking a DQ card filters drilldown to matching records
   if(STATE.dqFilter){
-    if(STATE.dqFilter === 'owner')      rows = rows.filter(r => r.dq_missing_owner);
-    if(STATE.dqFilter === 'theme')       rows = rows.filter(r => r.dq_missing_theme);
-    if(STATE.dqFilter === 'market')      rows = rows.filter(r => r.dq_missing_market);
-    if(STATE.dqFilter === 'rootCause')   rows = rows.filter(r => r.dq_missing_rootcause);
-    if(STATE.dqFilter === 'impact')      rows = rows.filter(r => !r.impact || !r.impact.trim());
-    if(STATE.dqFilter === 'rating')      rows = rows.filter(r => !r.rating || !r.rating.trim());
+    if(STATE.dqFilter === 'owner')    rows = rows.filter(r => r.dq_missing_owner);
+    if(STATE.dqFilter === 'theme')     rows = rows.filter(r => r.dq_missing_theme);
+    if(STATE.dqFilter === 'market')    rows = rows.filter(r => r.dq_missing_market);
+    if(STATE.dqFilter === 'rootCause')  rows = rows.filter(r => r.dq_missing_rootcause);
   }
 
   STATE.filtered = rows;
@@ -1257,7 +1210,7 @@ function renderKPIs(){
 
   // 1. Total OREs
   const totalOres = r.filter(x => x._kind === 'ore').length;
-  // 2. Total Data Issues
+  // 2. Total Issues
   const totalIssues = r.filter(x => x._kind === 'issue').length;
   // 3. Open
   const open = r.filter(x => x.is_open).length;
@@ -1288,9 +1241,8 @@ function renderKPIs(){
   const dqScorePct = Math.round((dqComplete / Math.max(r.length, 1)) * 100) + '%';
 
   const items = [
-    {l:'DQ Score', v:dqScorePct, cls:'ok'},
     {l:'Total OREs', v:totalOres},
-    {l:'Total Data Issues', v:totalIssues},
+    {l:'Total Issues', v:totalIssues},
     {l:'Open', v:open, cls:'warn'},
     {l:'Closed', v:closed, cls:'ok'},
     {l:'High Risk', v:high, cls:'danger'},
@@ -1298,7 +1250,8 @@ function renderKPIs(){
     {l:'Avg Age (days)', v:avgAge},
     {l:'Flagged', v:flagged},
     {l:'Open Critical', v:openCritical, cls:'danger'},
-    {l:'Aging 90d+', v:aging90, cls:'warn'}
+    {l:'Aging 90d+', v:aging90, cls:'warn'},
+    {l:'DQ Score', v:dqScorePct, cls:'ok'}
   ];
 
   document.getElementById('kpi-grid').innerHTML = items.map(i =>
@@ -1308,16 +1261,12 @@ function renderKPIs(){
 
 // ---------- Render: Latest Issues ----------
 function renderLatestIssues(){
-  const viewFiltered = STATE.view === 'ore'
-    ? STATE.records.filter(r => r._kind === 'ore')
-    : STATE.view === 'issue'
-    ? STATE.records.filter(r => r._kind === 'issue')
-    : STATE.records;
+  const now = new Date();
+  const ninetyDaysAgo = new Date(now.getTime() - 90 * 86400000);
 
-  const r = viewFiltered.filter(x => {
+  const r = STATE.filtered.filter(x => {
     if(!x.created_date) return false;
-    const cutoff = new Date(Date.now() - STATE.ntmWindow * 86400000);
-    return x.created_date.getTime() >= cutoff.getTime();
+    return x.created_date.getTime() >= ninetyDaysAgo.getTime();
   }).sort((a, b) => {
     const da = a.created_date ? a.created_date.getTime() : 0;
     const db = b.created_date ? b.created_date.getTime() : 0;
@@ -1328,20 +1277,18 @@ function renderLatestIssues(){
   const grid = document.getElementById('ntm-grid');
 
   if(!r.length){
-    grid.innerHTML = `<div style="color:var(--text-faint);font-size:12px;padding:12px;text-align:center">No records in the last ${STATE.ntmWindow} days.</div>`;
+    grid.innerHTML = '<div style="color:var(--text-faint);font-size:12px;padding:12px;text-align:center">No records in the last 90 days.</div>';
     return;
   }
 
-  grid.innerHTML = r.slice(0, 60).map(rec => {
-    const kindLabel = rec._kind === 'issue' ? 'DATA ISSUE' : 'ORE';
-    return `<div class="ntm-card" data-id="${escapeHtml(rec.id)}" data-kind="${rec._kind}">
+  grid.innerHTML = r.slice(0, 60).map(rec =>
+    `<div class="ntm-card" data-id="${escapeHtml(rec.id)}" data-kind="${rec._kind}">
        <div class="ntm-card-title">${escapeHtml(rec.title || rec.id || '—')}</div>
        <div class="ntm-card-meta">
-         <span class="badge badge-${rec._kind}">${kindLabel}</span>
+         <span class="badge badge-${rec._kind}">${rec._kind.toUpperCase()}</span>
          <span>${escapeHtml(rec.owner || '—')}</span>
          <span>${fmtDate(rec.created_date)}</span>
-       </div>`;
-  }).join('');
+       </div>
      </div>`
   ).join('');
 
@@ -1360,11 +1307,11 @@ function renderDQList(records){
   }
   const cols = [
     {k:'id', l:'ID'},
-    {k:'_kind', l:'Type', render:(r) => `<span class="badge badge-${r._kind}">${r._kind === 'issue' ? 'DATA ISSUE' : 'ORE'}</span>`},
+    {k:'_kind', l:'Type', render:(r) => `<span class="badge badge-${r._kind}">${r._kind.toUpperCase()}</span>`},
     {k:'title', l:'Title'},
     {k:'theme', l:'Theme'},
     {k:'is_open', l:'Status', render:(r) => `<span class="badge ${r.is_open ? 'badge-open' : 'badge-closed'}">${r.is_open ? 'Open' : 'Closed'}</span>`},
-    {k:'owner_normalized', l:'Owner', render:(r) => escapeHtml(r.owner || r.owner_normalized || '—')},
+    {k:'owner_normalized', l:'Owner'},
     {k:'markets_all', l:'Markets'},
     {k:'rating', l:'Rating', render:(r) => r.is_high ? `<span class="badge badge-high">${escapeHtml(r.rating || '—')}</span>` : escapeHtml(r.rating || '—')},
     {k:'age_days', l:'Age', render:(r) => r.age_days == null ? '—' : (r.age_days + 'd')},
@@ -1395,39 +1342,29 @@ function renderDQList(records){
 
 function renderDQ(){
   const r = STATE.filtered;
-  const total = r.length || 1;
 
   const missingOwner = r.filter(x => x.dq_missing_owner);
   const missingTheme = r.filter(x => x.dq_missing_theme);
   const missingMarket = r.filter(x => x.dq_missing_market);
   const missingRC = r.filter(x => x.dq_missing_rootcause);
-  const missingImpact = r.filter(x => !x.impact || !x.impact.trim());
-  const missingRating = r.filter(x => !x.rating || !x.rating.trim());
 
   const cards = [
-    { key: 'owner',      label: 'Owner Gap',           count: missingOwner.length, icon: '!' },
-    { key: 'theme',     label: 'Theme Gap',           count: missingTheme.length, icon: '!' },
-    { key: 'market',    label: 'Market Gap',           count: missingMarket.length, icon: '!' },
-    { key: 'rootCause', label: 'Root Cause Gap',         count: missingRC.length, icon: '!' },
-    { key: 'impact',    label: 'Impact Gap',            count: missingImpact.length, icon: '?' },
-    { key: 'rating',    label: 'Rating Gap',            count: missingRating.length, icon: '?' }
+    { key: 'owner',      label: 'Missing Owner',     count: missingOwner.length },
+    { key: 'theme',     label: 'Missing Theme',      count: missingTheme.length },
+    { key: 'market',    label: 'Missing Market',      count: missingMarket.length },
+    { key: 'rootCause', label: 'Missing Root Cause',  count: missingRC.length }
   ];
 
   const grid = document.getElementById('dq-grid');
   grid.innerHTML = cards.map(card => {
     const isActive = STATE.dqFilter === card.key;
-    const rate = total > 0 ? Math.round((card.count / total) * 100) : 0;
-    const rateColor = rate > 50 ? 'var(--danger)' : rate > 20 ? 'var(--warn)' : 'var(--ok)';
     return `
       <div class="dq-wrap" data-key="${card.key}">
-        <div class="dq-card ${isActive ? 'open' : ''}" title="Click to filter these gaps in the drilldown below">
-          <div class="dq-icon">${card.icon}</div>
+        <div class="dq-card ${isActive ? 'open' : ''}" title="Click to filter records in drilldown below">
+          <div class="dq-icon">!</div>
           <div class="dq-text">
             <div class="dq-label">${card.label}</div>
-            <div class="dq-value">${card.count} <span style="font-size:11px;color:var(--text-faint)">(${rate}%)</span></div>
-          </div>
-          <div class="dq-rate-bar-wrap" title="${rate}% gap rate">
-            <div class="dq-rate-bar" style="width:${rate}%;background:${rateColor}"></div>
+            <div class="dq-value">${card.count}</div>
           </div>
         </div>
       </div>
@@ -1535,20 +1472,9 @@ function renderFilters(){
     return;
   }
 
-  // Build owner display name lookup from full dataset
-  const ownerNameMap = new Map();
-  for(const rec of STATE.records){
-    if(rec.owner_normalized && rec.owner){
-      ownerNameMap.set(rec.owner_normalized, rec.owner);
-    }
-  }
-
-  tags.innerHTML = active.map(x => {
-    const displayVal = x.dim.key === 'owner' && ownerNameMap.has(x.val)
-      ? ownerNameMap.get(x.val)
-      : x.val;
-    return `<span class="filter-tag">${x.dim.label}: ${escapeHtml(displayVal)}<button data-dim="${x.dim.key}">&#10005;</button></span>`;
-  }).join('') + `<button class="clear-filters" id="clear-filters">Clear all</button>`;
+  tags.innerHTML = active.map(x =>
+    `<span class="filter-tag">${x.dim.label}: ${escapeHtml(x.val)}<button data-dim="${x.dim.key}">&#10005;</button></span>`
+  ).join('') + `<button class="clear-filters" id="clear-filters">Clear all</button>`;
 
   tags.querySelectorAll('.filter-tag button').forEach(b => {
     b.addEventListener('click', () => {
@@ -1700,76 +1626,6 @@ function makeDoughnut(canvas, labels, data){
   return new Chart(canvas, config);
 }
 
-function makeLine(canvas, labels, datasets){
-  const config = {
-    type: 'line',
-    data: {
-      labels,
-      datasets: datasets.map((ds, i) => ({
-        label: ds.label,
-        data: ds.data,
-        borderColor: ds.color || CHART_COLORS[i],
-        backgroundColor: (ds.color || CHART_COLORS[i]) + '22',
-        borderWidth: 2,
-        pointRadius: 3,
-        pointHoverRadius: 5,
-        fill: ds.fill || false,
-        tension: 0.35,
-        spanGaps: true
-      }))
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: { duration: 260 },
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          backgroundColor: '#14181d',
-          borderColor: '#252b33',
-          borderWidth: 1,
-          titleFont: {family: 'DM Sans', size: 12},
-          bodyFont: {family: 'DM Mono', size: 12},
-          padding: 10
-        }
-      },
-      scales: {
-        x: {
-          ticks: {
-            color: '#9aa4b2',
-            font: {family: 'DM Mono', size: 10},
-            maxRotation: 0
-          },
-          grid: { color: 'rgba(255,255,255,0.04)' }
-        },
-        y: {
-          ticks: {
-            color: '#9aa4b2',
-            font: {family: 'DM Mono', size: 10},
-            precision: 0
-          },
-          grid: { color: 'rgba(255,255,255,0.04)' },
-          beginAtZero: true
-        }
-      }
-    }
-  };
-  return new Chart(canvas, config);
-}
-
-function updateLine(chart, labels, datasets){
-  chart.data.labels = labels;
-  chart.data.datasets.forEach((ds, i) => {
-    if(datasets[i]){
-      ds.data = datasets[i].data;
-      if(datasets[i].color) ds.borderColor = datasets[i].color;
-      if(datasets[i].fill !== undefined) ds.fill = datasets[i].fill;
-    }
-  });
-  chart.update('none');
-}
-
 function updateBar(chart, labels, data, opts = {}){
   const trunc = opts.trunc || 22;
   chart.data.labels = labels.map(l => truncateLabel(l, trunc));
@@ -1791,53 +1647,11 @@ function renderCharts(){
   const r = STATE.filtered;
   const ch = STATE.charts;
 
-  // 0. Volume Trend — build monthly buckets from created_date
-  const MONTHS_BACK = 12;
-  const now = new Date();
-  const monthBuckets = [];
-  for(let i = MONTHS_BACK - 1; i >= 0; i--){
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    monthBuckets.push(d.toISOString().slice(0, 7));
-  }
-
-  function monthlyFor(kind){
-    return monthBuckets.map(mk => {
-      return r.filter(rec => {
-        if(kind && rec._kind !== kind) return false;
-        if(!rec.created_date) return false;
-        const cm = rec.created_date.toISOString().slice(0, 7);
-        return cm === mk;
-      }).length;
-    });
-  }
-
-  const trendDatasets = [
-    { label: 'ORE', data: monthlyFor('ore'), color: '#2e77ff', fill: true },
-    { label: 'Data Issues', data: monthlyFor('issue'), color: '#f7a82b', fill: false },
-    { label: 'Combined', data: monthlyFor(null), color: '#3ed98c', fill: false }
-  ];
-
-  if(!ch.trend){
-    ch.trend = makeLine(document.getElementById('chart-trend'), monthBuckets, trendDatasets);
-  } else {
-    updateLine(ch.trend, monthBuckets, trendDatasets);
-  }
-
-  // Render trend legend
-  const legendColors = ['#2e77ff','#f7a82b','#3ed98c'];
-  const legendLabels = ['ORE','Data Issues','Combined'];
-  document.getElementById('trend-legend').innerHTML = legendLabels.map((lbl, i) =>
-    `<div class="trend-legend-item">
-      <span class="dot" style="background:${legendColors[i]}"></span>
-      <span>${lbl}</span>
-    </div>`
-  ).join('');
-
-  // 1. Theme bar chart (all themes, sorted descending)
+  // 1. Theme bar chart (top 10)
   const themeMap = countBy(r, 'theme');
-  const themeEntries = Array.from(themeMap.entries()).sort((a, b) => b[1] - a[1]);
-  const themeLabels = themeEntries.map(x => x[0]);
-  const themeData = themeEntries.map(x => x[1]);
+  const themeTop = topNEntries(themeMap, 10);
+  const themeLabels = themeTop.map(x => x[0]);
+  const themeData = themeTop.map(x => x[1]);
 
   if(!ch.theme){
     ch.theme = makeBar(document.getElementById('chart-theme'), themeLabels, themeData, { colors: CHART_COLORS[0] });
@@ -1862,30 +1676,22 @@ function renderCharts(){
     ch.age = makeBar(document.getElementById('chart-age'), ageOrder, ageData, { colors: CHART_COLORS[3] });
   } else updateBar(ch.age, ageOrder, ageData);
 
-  // 4. Owner bar chart — all owners, sorted descending
+  // 4. Owner bar chart (top 10) - use owner_normalized
   const ownerMap = new Map();
   for(const rec of r){
     const v = rec.owner_normalized || '(blank)';
     ownerMap.set(v, (ownerMap.get(v) || 0) + 1);
   }
-  const ownerEntries = Array.from(ownerMap.entries()).sort((a, b) => b[1] - a[1]);
-  const ownerLabels = ownerEntries.map(x => x[0]);
-  const ownerData = ownerEntries.map(x => x[1]);
+  const ownerTop = topNEntries(ownerMap, 10);
+  const ownerLabels = ownerTop.map(x => x[0]);
+  const ownerData = ownerTop.map(x => x[1]);
 
   if(!ch.owner){
     ch.owner = makeBar(document.getElementById('chart-owner'), ownerLabels, ownerData, { horizontal: true, colors: CHART_COLORS[1] });
   } else updateBar(ch.owner, ownerLabels, ownerData, { horizontal: true });
 
-  // 5. Market bar chart — when a market filter is active, show only that market
-  let marketTop;
-  if(STATE.filters.market){
-    const count = countByMarkets(r).get(STATE.filters.market) || 0;
-    marketTop = count > 0 ? [[STATE.filters.market, count]] : [];
-  } else {
-    const all = countByMarkets(r);
-    const entries = Array.from(all.entries()).sort((a, b) => b[1] - a[1]);
-    marketTop = entries;
-  }
+  // 5. Market bar chart (top 10) - split markets_all by "; "
+  const marketTop = topNEntries(countByMarkets(r), 10);
   const marketLabels = marketTop.map(x => x[0]);
   const marketData = marketTop.map(x => x[1]);
 
@@ -1907,7 +1713,7 @@ function renderCharts(){
 // ---------- Render: Table ----------
 const TABLE_COLS = [
   {k:'id', l:'ID', w:100},
-  {k:'_kind', l:'Type', w:90, render:(r) => `<span class="badge badge-${r._kind}">${r._kind === 'issue' ? 'DATA ISSUE' : 'ORE'}</span>`},
+  {k:'_kind', l:'Type', w:70, render:(r) => `<span class="badge badge-${r._kind}">${r._kind.toUpperCase()}</span>`},
   {k:'title', l:'Title', w:260},
   {k:'theme', l:'Theme', w:140},
   {k:'is_open', l:'Status', w:100, render:(r) => `<span class="badge ${r.is_open ? 'badge-open' : 'badge-closed'}">${r.is_open ? 'Open' : 'Closed'}</span>`},
@@ -2025,92 +1831,33 @@ function renderTable(){
 // ---------- Deep Dive ----------
 function openDeepDive(rec){
   document.getElementById('dd-title').textContent = rec.title || rec.id || '—';
-  document.getElementById('dd-subtitle').textContent = `${kindLabel} · ${rec.id || '—'}`;
+  document.getElementById('dd-subtitle').textContent = `${rec._kind.toUpperCase()} · ${rec.id || '—'}`;
 
-  const kindLabel = rec._kind === 'ore' ? 'ORE' : 'Data Issue';
-  const isORE = rec._kind === 'ore';
-
-  const kindSpecificRows = [];
-  if(isORE){
-    if(rec.root_cause)          kindSpecificRows.push(['Root Cause', rec.root_cause, true]);
-    if(rec.impact)              kindSpecificRows.push(['Impact', rec.impact, true]);
-  } else {
-    if(rec.description)         kindSpecificRows.push(['Issue Description', rec.description, true]);
-  }
-  if(rec.markets_all && rec.markets.length > 1){
-    kindSpecificRows.push(['All Markets', rec.markets_all, true]);
-    kindSpecificRows.push(['Market Count', rec.markets.length, false]);
-  }
-  if(rec.team)                 kindSpecificRows.push(['Team', rec.team, false]);
-  if(rec.theme_raw)            kindSpecificRows.push(['Raw Theme', rec.theme_raw, false]);
-  if(rec.is_high)              kindSpecificRows.push(['High Priority', 'Yes', false]);
-  if(rec.is_overdue)           kindSpecificRows.push(['Overdue', 'Yes', false]);
-  if(rec.is_due_soon)          kindSpecificRows.push(['Due Soon', 'Yes', false]);
-  if(rec.is_flagged)           kindSpecificRows.push(['Flagged', 'Yes', false]);
-
-  const coreFields = [
+  const fields = [
     ['ID', rec.id, false],
-    ['Kind', kindLabel, false],
+    ['Type', rec._kind.toUpperCase(), false],
     ['Status', rec.is_open ? 'Open' : 'Closed', false],
     ['Theme', rec.theme, false],
     ['Rating', rec.rating, false],
     ['Owner', rec.owner, false],
-    ['Market', rec.market || '—', false],
+    ['Markets', rec.markets_all || rec.market, true],
     ['Created', fmtDate(rec.created_date), false],
     ['Due', fmtDate(rec.due_date), false],
     ['Closed', fmtDate(rec.closed_date), false],
-    ['Age (days)', rec.age_days == null ? '—' : rec.age_days, false]
-  ];
-
-  const titleDescFields = [
+    ['Age (days)', rec.age_days == null ? '—' : rec.age_days, false],
+    ['Root Cause', rec.root_cause, true],
+    ['Impact', rec.impact, true],
     ['Title', rec.title, true],
     ['Description', rec.description, true]
   ];
 
-  // DQ gap flags
-  const dqFlags = [];
-  if(rec.dq_missing_owner)      dqFlags.push('Owner Missing');
-  if(rec.dq_missing_theme)     dqFlags.push('Theme Missing');
-  if(rec.dq_missing_market)    dqFlags.push('Market Missing');
-  if(rec.dq_missing_rootcause)  dqFlags.push('Root Cause Missing');
-  if(dqFlags.length){
-    kindSpecificRows.push(['DQ Gaps', dqFlags.join(', '), false]);
-  }
-
-  let html = '';
-
-  // Core identifiers section
-  html += `<div class="dd-field full" style="margin-bottom:10px">
-    <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);margin-bottom:8px">Record Details</div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px">`;
-  for(const [l, v, full] of coreFields){
+  let html = fields.map(([l, v, full]) => {
     const empty = !v || v === '—' || v === '';
-    html += `<div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px">${l}</div>
-      <div style="font-size:13px;font-weight:500">${empty ? '—' : escapeHtml(String(v))}</div></div>`;
-  }
-  html += `</div></div>`;
-
-  // Title / Description
-  for(const [l, v, full] of titleDescFields){
-    const empty = !v || v === '—' || v === '';
-    html += `<div class="dd-field ${full ? 'full' : ''}">
+    return `<div class="dd-field ${full ? 'full' : ''}">
       <div class="dd-field-label">${l}</div>
-      <div class="dd-field-value ${empty ? 'empty' : ''}" style="font-size:13px">${empty ? '—' : escapeHtml(String(v))}</div>
+      <div class="dd-field-value ${empty ? 'empty' : ''}">${empty ? '—' : escapeHtml(String(v))}</div>
     </div>`;
-  }
-
-  // Kind-specific and extra fields
-  if(kindSpecificRows.length){
-    html += `<div class="dd-field full" style="margin-bottom:10px">
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);margin-bottom:8px">${isORE ? 'Event' : 'Issue'} Details</div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px">`;
-    for(const [l, v, full] of kindSpecificRows){
-      const empty = !v || v === '—' || v === '';
-      html += `<div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px">${l}</div>
-        <div style="font-size:12px;word-break:break-word">${empty ? '—' : escapeHtml(String(v))}</div></div>`;
-    }
-    html += `</div></div>`;
-  }
+  }).join('');
 
   // Raw passthrough columns
   if(rec._raw && Object.keys(rec._raw).length){
@@ -2134,7 +1881,7 @@ function openDeepDive(rec){
 
     if(extras.length){
       html += `<div class="dd-field full" style="background:transparent;border:none;padding:0;margin-top:8px">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);margin-bottom:8px">Additional Fields</div>
+        <div class="dd-field-label" style="margin-bottom:8px">Additional Source Columns</div>
       </div>`;
       html += extras.map(([k, v]) =>
         `<div class="dd-field full">
@@ -2325,29 +2072,6 @@ document.addEventListener('DOMContentLoaded', function(){
   document.getElementById('ntm-header').addEventListener('click', () => {
     document.getElementById('ntm-header').classList.toggle('open');
     document.getElementById('ntm-body').classList.toggle('open');
-  });
-
-  // Latest issues window pills
-  document.getElementById('ntm-window-pills').addEventListener('click', e => {
-    const pill = e.target.closest('.window-pill');
-    if(!pill) return;
-    STATE.ntmWindow = parseInt(pill.dataset.days, 10);
-    renderLatestIssues();
-  });
-
-  // Chart download buttons
-  document.querySelectorAll('.chart-download-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const key = btn.dataset.chart;
-      const chart = STATE.charts[key];
-      if(!chart) return;
-      const title = btn.closest('.chart-card').querySelector('.chart-title').textContent;
-      const url = chart.toBase64Image('image/png', 1);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${title.replace(/\s+/g, '_').toLowerCase()}_chart.png`;
-      a.click();
-    });
   });
 
   // Search
